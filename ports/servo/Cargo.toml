@@ -55,5 +55,5 @@ libc = "0.2"
 android_glue = "0.2"
 
 [replace]
-"webrender:0.10.0" = { path = '/Users/gregory/projects/webrender/webrender/' }
-"webrender_traits:0.10.0" = { path = '/Users/gregory/projects/webrender/webrender_traits/' }
+"webrender:0.10.0" = { path = '/home/test/Projects/webrender-implement_scroll_handoff/webrender' }
+"webrender_traits:0.10.0" = { path = '/home/test/Projects/webrender-implement_scroll_handoff/webrender/webrender_traits/' }
