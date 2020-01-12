@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+use crate::compartments::{AlreadyInCompartment, InCompartment};
 use crate::dom::bindings::codegen::Bindings::BlobBinding;
 use crate::dom::bindings::codegen::Bindings::BlobBinding::BlobMethods;
 use crate::dom::bindings::codegen::UnionTypes::ArrayBufferOrArrayBufferViewOrBlobOrString;
@@ -12,12 +13,18 @@ use crate::dom::bindings::serializable::{Serializable, StorageKey};
 use crate::dom::bindings::str::DOMString;
 use crate::dom::bindings::structuredclone::StructuredDataHolder;
 use crate::dom::globalscope::GlobalScope;
+use crate::dom::promise::Promise;
 use dom_struct::dom_struct;
+use encoding_rs::UTF_8;
+use js::jsapi::JSObject;
+use js::typedarray::{ArrayBuffer, CreateWith};
 use msg::constellation_msg::{BlobId, BlobIndex, PipelineNamespaceId};
 use net_traits::filemanager_thread::RelativePos;
 use script_traits::serializable::BlobImpl;
 use std::collections::HashMap;
 use std::num::NonZeroU32;
+use std::ptr;
+use std::rc::Rc;
 use uuid::Uuid;
 
 // https://w3c.github.io/FileAPI/#blob
@@ -221,6 +228,60 @@ impl BlobMethods for Blob {
         let rel_pos = RelativePos::from_opts(start, end);
         let blob_impl = BlobImpl::new_sliced(rel_pos, self.blob_id.clone(), type_string);
         Blob::new(&*self.global(), blob_impl)
+    }
+
+    // https://w3c.github.io/FileAPI/#text-method-algo
+    fn Text(&self) -> Rc<Promise> {
+        let in_compartment_proof = AlreadyInCompartment::assert(&self.global());
+        let p = Promise::new_in_current_compartment(
+            &self.global(),
+            InCompartment::Already(&in_compartment_proof),
+        );
+        let id = self.get_blob_url_id();
+        self.global().read_file_async(
+            id,
+            p.clone(),
+            Box::new(|promise, bytes| {
+                let bytes = bytes.unwrap();
+                let (text, _, _) = UTF_8.decode(&bytes);
+                let text = DOMString::from(text);
+                promise.resolve_native(&text);
+            }),
+        );
+        p
+    }
+
+    // https://w3c.github.io/FileAPI/#arraybuffer-method-algo
+    #[allow(unsafe_code)]
+    fn ArrayBuffer(&self) -> Rc<Promise> {
+        let in_compartment_proof = AlreadyInCompartment::assert(&self.global());
+        let p = Promise::new_in_current_compartment(
+            &self.global(),
+            InCompartment::Already(&in_compartment_proof),
+        );
+
+        let id = self.get_blob_url_id();
+
+        self.global().read_file_async(
+            id,
+            p.clone(),
+            Box::new(|promise, bytes| {
+                let bytes = bytes.unwrap();
+                let cx = promise.global().get_cx();
+                unsafe {
+                    rooted!(in(*cx) let mut array_buffer = ptr::null_mut::<JSObject>());
+                    assert!(ArrayBuffer::create(
+                        *cx,
+                        CreateWith::Slice(&bytes),
+                        array_buffer.handle_mut()
+                    )
+                    .is_ok());
+
+                    promise.resolve_native(&*array_buffer);
+                }
+            }),
+        );
+        p
     }
 }
 
