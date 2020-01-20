@@ -9,7 +9,7 @@ use crate::dom::bindings::codegen::Bindings::VoidFunctionBinding::VoidFunction;
 use crate::dom::bindings::codegen::Bindings::WindowBinding::WindowMethods;
 use crate::dom::bindings::codegen::Bindings::WorkerGlobalScopeBinding::WorkerGlobalScopeMethods;
 use crate::dom::bindings::conversions::{root_from_object, root_from_object_static};
-use crate::dom::bindings::error::{report_pending_exception, ErrorInfo};
+use crate::dom::bindings::error::{report_pending_exception, Error, ErrorInfo};
 use crate::dom::bindings::inheritance::Castable;
 use crate::dom::bindings::refcounted::{Trusted, TrustedPromise};
 use crate::dom::bindings::reflector::DomObject;
@@ -93,7 +93,6 @@ use std::ops::Index;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::thread;
 use time::{get_time, Timespec};
 use uuid::Uuid;
 
@@ -1254,23 +1253,64 @@ impl GlobalScope {
         &self,
         id: Uuid,
         promise: Rc<Promise>,
-        f: Box<dyn Fn(Rc<Promise>, Result<Vec<u8>, ()>) + Send>,
+        f: Box<dyn Fn(Rc<Promise>, Result<Vec<u8>, Error>) + Send>,
     ) {
         let recv = self.send_msg(id);
         let trusted_promise = TrustedPromise::new(promise);
         let canceller = self.task_canceller(TaskSourceName::FileReading);
         let task_source = self.file_reading_task_source();
-        thread::spawn(move || {
-            let bytes = GlobalScope::read_msg(recv);
-            let _ = task_source.queue_with_canceller(
-                task!(resolve_promise: move || {
-                    let promise = trusted_promise.root();
-                    let _ac = enter_realm(&*promise.global());
-                    f(promise, bytes);
-                }),
-                &canceller,
-            );
-        });
+
+        ROUTER.add_route(
+            recv.to_opaque(),
+            Box::new(move |message| {
+                let message = message.to();
+                let mut bytes = vec![];
+                
+                match message {
+                    Ok(ReadFileProgress::Meta(mut blob_buf)) => {
+                        bytes.append(&mut blob_buf.bytes);
+                    },
+                    Ok(ReadFileProgress::Partial(mut bytes_in)) => {
+                        bytes.append(&mut bytes_in);
+                    },
+                    Ok(ReadFileProgress::EOF) => {
+                        let bytes = Ok(bytes);
+                        let _ = task_source.queue_with_canceller(
+                            task!(resolve_promise: move || {
+                                let promise = trusted_promise.root();
+                                let _ac = enter_realm(&*promise.global());
+                                f(promise, bytes);
+                            }),
+                            &canceller,
+                        );
+                        return;
+                    },
+                    Err(_) => {
+                        let bytes = Err(Error::Network);
+                        let _ = task_source.queue_with_canceller(
+                            task!(resolve_promise: move || {
+                                let promise = trusted_promise.root();
+                                let _ac = enter_realm(&*promise.global());
+                                f(promise, bytes);
+                            }),
+                            &canceller,
+                        );
+                        return;
+                    },
+                } 
+            })
+        );
+        //thread::spawn(move || {
+        //    let bytes = GlobalScope::read_msg(recv);
+        //    let _ = task_source.queue_with_canceller(
+        //        task!(resolve_promise: move || {
+        //            let promise = trusted_promise.root();
+        //            let _ac = enter_realm(&*promise.global());
+        //            f(promise, bytes);
+        //        }),
+        //        &canceller,
+        //    );
+        //});
     }
 
     fn send_msg(&self, id: Uuid) -> profile_ipc::IpcReceiver<FileManagerResult<ReadFileProgress>> {

@@ -242,10 +242,16 @@ impl BlobMethods for Blob {
             id,
             p.clone(),
             Box::new(|promise, bytes| {
-                let bytes = bytes.unwrap();
-                let (text, _, _) = UTF_8.decode(&bytes);
-                let text = DOMString::from(text);
-                promise.resolve_native(&text);
+                match bytes {
+                    Ok(b) => {
+                        let (text, _, _) = UTF_8.decode(&b);
+                        let text = DOMString::from(text);
+                        promise.resolve_native(&text);
+                    }
+                    Err(e) => {
+                        promise.reject_error(e);
+                    }
+                }
             }),
         );
         p
@@ -266,19 +272,25 @@ impl BlobMethods for Blob {
             id,
             p.clone(),
             Box::new(|promise, bytes| {
-                let bytes = bytes.unwrap();
-                let cx = promise.global().get_cx();
-                unsafe {
-                    rooted!(in(*cx) let mut array_buffer = ptr::null_mut::<JSObject>());
-                    assert!(ArrayBuffer::create(
-                        *cx,
-                        CreateWith::Slice(&bytes),
-                        array_buffer.handle_mut()
-                    )
-                    .is_ok());
-
-                    promise.resolve_native(&*array_buffer);
-                }
+                match bytes {
+                    Ok(b) => {
+                        let cx = promise.global().get_cx();
+                        unsafe {
+                            rooted!(in(*cx) let mut array_buffer = ptr::null_mut::<JSObject>());
+                            assert!(ArrayBuffer::create(
+                                *cx,
+                                CreateWith::Slice(&b),
+                                array_buffer.handle_mut()
+                            )
+                            .is_ok());
+        
+                            promise.resolve_native(&*array_buffer);
+                        }
+                    },
+                    Err(e) => {
+                        promise.reject_error(e);
+                    }
+                };
             }),
         );
         p
