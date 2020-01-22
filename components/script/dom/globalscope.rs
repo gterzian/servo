@@ -229,9 +229,16 @@ struct TimerListener {
 
 ///  A wrapper for blob data sent over the ipc router.
 struct FileListener {
-    file_bytes: DomRefCell<FileBytes>,
+    state: Option<FileListenerState>,
     task_source: FileReadingTaskSource,
     task_canceller: TaskCanceller,
+}
+
+struct FileListenerCallback(Box<dyn Fn(Rc<Promise>, Result<Vec<u8>, Error>) + Send>);
+
+enum FileListenerState {
+    Empty(FileListenerCallback, TrustedPromise),
+    Receiving(Vec<u8>, FileListenerCallback, TrustedPromise),
 }
 
 #[derive(JSTraceable, MallocSizeOf)]
@@ -286,15 +293,6 @@ pub enum MessagePortState {
     ),
     /// This global is not managing any ports at this time.
     UnManaged,
-}
-
-enum FileBytes {
-    /// The initial value when first creating a FileListener,
-    Empty,
-    /// The value after having received the Meta message.
-    Receiving(Vec<u8>),
-    /// The value after having queued the task resolving the promise.
-    Done,
 }
 
 impl TimerListener {
@@ -402,55 +400,58 @@ impl MessageListener {
 }
 
 impl FileListener {
-    fn handle(&self, byte: Result<ReadFileProgress, Box<ErrorKind>>, bytes: Vec<u8>, trusted_promise: TrustedPromise, f: Box<dyn Fn(Rc<Promise>, Result<Vec<u8>, Error>) + Send>) {
-        match byte {
-            Ok(ReadFileProgress::Meta(mut blob_buf)) => {
-                bytes.append(&mut blob_buf.bytes);
-            //    assert_eq!(&*self.file_bytes.borrow(), FileBytes::Empty);
-                if let FileBytes::Empty = &*self.file_bytes.borrow() {
-                    *self.file_bytes.borrow_mut() = FileBytes::Receiving(bytes);
-                } else {
-                    panic!("file_bytes not Empty");
-                }
+    fn handle(&mut self, msg: Result<ReadFileProgress, Box<ErrorKind>>) {
+        match msg {
+            Ok(ReadFileProgress::Meta(blob_buf)) => match self.state.take() {
+                Some(FileListenerState::Empty(callback, promise)) => {
+                    self.state = Some(FileListenerState::Receiving(
+                        blob_buf.bytes,
+                        callback,
+                        promise,
+                    ));
+                },
+                _ => panic!(
+                    "Unexpected FileListenerState when receiving ReadFileProgress::Meta msg."
+                ),
             },
-            Ok(ReadFileProgress::Partial(mut bytes_in)) => {
-            //    assert_eq!(&*self.file_bytes.borrow(), FileBytes::Receiving);
-                if let FileBytes::Receiving(bytes) = &*self.file_bytes.borrow_mut() {
+            Ok(ReadFileProgress::Partial(mut bytes_in)) => match self.state.take() {
+                Some(FileListenerState::Receiving(mut bytes, callback, promise)) => {
                     bytes.append(&mut bytes_in);
-                } else {
-                    panic!("file_bytes not Receiving");
-                }
+                    self.state = Some(FileListenerState::Receiving(bytes, callback, promise));
+                },
+                _ => panic!(
+                    "Unexpected FileListenerState when receiving ReadFileProgress::Partial msg."
+                ),
             },
-            Ok(ReadFileProgress::EOF) => {
-            //    assert_eq!(&*self.file_bytes.borrow(), FileBytes::Receiving);
-                if let FileBytes::Receiving(bytes) = &*self.file_bytes.borrow_mut() {
+            Ok(ReadFileProgress::EOF) => match self.state.take() {
+                Some(FileListenerState::Receiving(bytes, callback, trusted_promise)) => {
                     let _ = self.task_source.queue_with_canceller(
                         task!(resolve_promise: move || {
                             let promise = trusted_promise.root();
                             let _ac = enter_realm(&*promise.global());
-                            f(promise, Ok(bytes.to_vec()));
+                            callback.0(promise, Ok(bytes));
                         }),
                         &self.task_canceller,
                     );
-                } else {
-                    panic!("file_bytes not Receiving");
-                }
-                *self.file_bytes.borrow_mut() = FileBytes::Done;
+                },
+                _ => {
+                    panic!("Unexpected FileListenerState when receiving ReadFileProgress::EOF msg.")
+                },
             },
-            Err(_) => {
-                match &*self.file_bytes.borrow() {
-                    FileBytes::Empty | FileBytes::Receiving(_) => {
-                        let bytes = Err(Error::Network);
-                        let _ = self.task_source.queue_with_canceller(
-                            task!(resolve_promise: move || {
-                                let promise = trusted_promise.root();
-                                let _ac = enter_realm(&*promise.global());
-                                f(promise, bytes);
-                            }),
-                            &self.task_canceller,
-                        );
-                    },
-                }
+            Err(_) => match self.state.take() {
+                Some(FileListenerState::Receiving(_, callback, trusted_promise)) |
+                Some(FileListenerState::Empty(callback, trusted_promise)) => {
+                    let bytes = Err(Error::Network);
+                    let _ = self.task_source.queue_with_canceller(
+                        task!(resolve_promise: move || {
+                            let promise = trusted_promise.root();
+                            let _ac = enter_realm(&*promise.global());
+                            callback.0(promise, bytes);
+                        }),
+                        &self.task_canceller,
+                    );
+                },
+                _ => panic!("Unexpected FileListenerState when receiving Err msg."),
             },
         }
     }
@@ -1325,28 +1326,27 @@ impl GlobalScope {
         &self,
         id: Uuid,
         promise: Rc<Promise>,
-        f: Box<dyn Fn(Rc<Promise>, Result<Vec<u8>, Error>) + Send>,
+        callback: Box<dyn Fn(Rc<Promise>, Result<Vec<u8>, Error>) + Send>,
     ) {
         let recv = self.send_msg(id);
 
-        let file_bytes = DomRefCell::new(FileBytes::Empty);
+        let trusted_promise = TrustedPromise::new(promise);
         let task_canceller = self.task_canceller(TaskSourceName::FileReading);
         let task_source = self.file_reading_task_source();
 
-        let file_listener = FileListener {
-            file_bytes,
+        let mut file_listener = FileListener {
+            state: Some(FileListenerState::Empty(
+                FileListenerCallback(callback),
+                trusted_promise,
+            )),
             task_source,
             task_canceller,
         };
 
-        let trusted_promise = TrustedPromise::new(promise);
-        let bytes: Vec<u8> = vec![];
-
         ROUTER.add_route(
             recv.to_opaque(),
-            Box::new(move |byte| {
-                let byte = byte.to();
-                file_listener.handle(byte, bytes, trusted_promise, f);
+            Box::new(move |msg| {
+                file_listener.handle(msg.to());
             }),
         );
     }
