@@ -52,7 +52,6 @@ use crate::task_source::TaskSource;
 use crate::task_source::TaskSourceName;
 use crate::timers::{IsInterval, OneshotTimerCallback, OneshotTimerHandle};
 use crate::timers::{OneshotTimers, TimerCallback};
-use bincode::ErrorKind;
 use content_security_policy::CspList;
 use devtools_traits::{PageError, ScriptToDevtoolsControlMsg};
 use dom_struct::dom_struct;
@@ -400,7 +399,8 @@ impl MessageListener {
 }
 
 impl FileListener {
-    fn handle(&mut self, msg: Result<ReadFileProgress, Box<ErrorKind>>) {
+    fn handle(&mut self, msg: FileManagerResult<ReadFileProgress>) {
+        println!("Got message: {:?}", msg);
         match msg {
             Ok(ReadFileProgress::Meta(blob_buf)) => match self.state.take() {
                 Some(FileListenerState::Empty(callback, promise)) => {
@@ -1346,7 +1346,7 @@ impl GlobalScope {
         ROUTER.add_route(
             recv.to_opaque(),
             Box::new(move |msg| {
-                file_listener.handle(msg.to());
+                file_listener.handle(msg.to().expect("Deserialization of file listener msg failed."));
             }),
         );
     }

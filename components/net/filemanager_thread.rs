@@ -429,6 +429,7 @@ impl FileManagerStore {
         rel_pos: RelativePos,
         check_url_validity: bool,
     ) -> Result<(), BlobURLStoreError> {
+        println!("get_blob_buf");
         let file_impl = self.get_impl(id, origin_in, check_url_validity)?;
         match file_impl {
             FileImpl::Memory(buf) => {
@@ -440,8 +441,13 @@ impl FileManagerStore {
                     bytes: buf.bytes.index(range).to_vec(),
                 };
 
-                let _ = sender.send(Ok(ReadFileProgress::Meta(buf)));
-                let _ = sender.send(Ok(ReadFileProgress::EOF));
+                println!("Sending bytes: {:?}", buf);
+
+                let res1 = sender.send(Ok(ReadFileProgress::Meta(buf)));
+                println!("Res one is: {:?}", res1);
+                let res2 = sender.send(Ok(ReadFileProgress::EOF));
+                println!("Res two is: {:?}", res2);
+                println!("Sent entire file");
 
                 Ok(())
             },
@@ -749,6 +755,7 @@ fn read_file_in_chunks(
         match file.read(&mut buf) {
             Ok(0) => {
                 let _ = sender.send(Ok(ReadFileProgress::EOF));
+                println!("Sent file in chunk");
                 return;
             },
             Ok(n) => {
