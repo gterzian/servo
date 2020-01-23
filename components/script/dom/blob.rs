@@ -241,17 +241,15 @@ impl BlobMethods for Blob {
         self.global().read_file_async(
             id,
             p.clone(),
-            Box::new(|promise, bytes| {
-                match bytes {
-                    Ok(b) => {
-                        let (text, _, _) = UTF_8.decode(&b);
-                        let text = DOMString::from(text);
-                        promise.resolve_native(&text);
-                    }
-                    Err(e) => {
-                        promise.reject_error(e);
-                    }
-                }
+            Box::new(|promise, bytes| match bytes {
+                Ok(b) => {
+                    let (text, _, _) = UTF_8.decode(&b);
+                    let text = DOMString::from(text);
+                    promise.resolve_native(&text);
+                },
+                Err(e) => {
+                    promise.reject_error(e);
+                },
             }),
         );
         p
@@ -283,13 +281,13 @@ impl BlobMethods for Blob {
                                 array_buffer.handle_mut()
                             )
                             .is_ok());
-        
+
                             promise.resolve_native(&*array_buffer);
                         }
                     },
                     Err(e) => {
                         promise.reject_error(e);
-                    }
+                    },
                 };
             }),
         );
