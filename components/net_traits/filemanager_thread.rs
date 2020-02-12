@@ -16,6 +16,17 @@ use uuid::Uuid;
 /// File manager store entry's origin
 pub type FileOrigin = String;
 
+/// A token modulating access to a file for a blob URL.
+pub enum FileTokenCheck {
+    /// Checking against a token not required,
+    /// used for accessing a file
+    /// that isn't linked to from a blob URL.
+    NotRequired,
+    /// Checking against token required,
+    /// the None case always fails.
+    Required(Option<Uuid>),
+}
+
 /// Relative slice positions of a sequence,
 /// whose semantic should be consistent with (start, end) parameters in
 /// <https://w3c.github.io/FileAPI/#dfn-slice>
@@ -125,7 +136,6 @@ pub enum FileManagerThreadMsg {
     ReadFile(
         IpcSender<FileManagerResult<ReadFileProgress>>,
         Uuid,
-        bool,
         FileOrigin,
     ),
 
