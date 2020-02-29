@@ -587,6 +587,7 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
             Some(DocumentOrBodyInit::ArrayBufferView(ref typedarray)) => {
                 Some((typedarray.to_vec(), None))
             },
+            Some(DocumentOrBodyInit::ReadableStream(_)) => None,
             None => None,
         };
 
@@ -920,6 +921,7 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
                 Some(js_object) => unsafe { js_object.to_jsval(*cx, rval.handle_mut()) },
                 None => return NullValue(),
             },
+            XMLHttpRequestResponseType::Readablestream => return NullValue(),
         }
         rval.get()
     }
@@ -1628,6 +1630,7 @@ impl Extractable for BodyInit {
             BodyInit::FormData(ref formdata) => formdata.extract(),
             BodyInit::ArrayBuffer(ref typedarray) => ((typedarray.to_vec(), None)),
             BodyInit::ArrayBufferView(ref typedarray) => ((typedarray.to_vec(), None)),
+            BodyInit::ReadableStream(_) => (Vec::with_capacity(0), None),
         }
     }
 }
