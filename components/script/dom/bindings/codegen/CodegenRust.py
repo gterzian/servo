@@ -917,6 +917,30 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
 
         return handleOptional(templateBody, declType, handleDefault("None"))
 
+    if type.isReadableStream():
+        assert not isEnforceRange and not isClamp
+
+        templateBody = '''
+        use js::friendapi::UnwrapReadableStream;
+        UnwrapReadableStream(${val}.get().to_object())
+        '''
+        default = "ptr::null_mut()"
+
+        if isMember in ("Dictionary", "Union"):
+            templateBody = "*Heap::boxed(%s)" % templateBody
+            default = "Heap::default()"
+            declType = CGGeneric("Heap<*mut JSObject>")
+        else:
+            # TODO: Need to root somehow
+            # https://github.com/servo/servo/issues/6382
+            declType = CGGeneric("*mut JSObject")
+
+        templateBody = wrapObjectTemplate(templateBody, default,
+                                          isDefinitelyObject, type, failureCode)
+
+        return handleOptional(templateBody, declType,
+                              handleDefault(default))
+
     elif type.isSpiderMonkeyInterface():
         raise TypeError("Can't handle SpiderMonkey interface arguments other than typed arrays yet")
 
@@ -4382,6 +4406,9 @@ def getUnionTypeTemplateVars(type, descriptorProvider):
         name = type.name
         typeName = builtinNames[type.tag()]
     elif type.isObject():
+        name = type.name
+        typeName = "Heap<*mut JSObject>"
+    elif type.isReadableStream():
         name = type.name
         typeName = "Heap<*mut JSObject>"
     elif is_typed_array(type):
