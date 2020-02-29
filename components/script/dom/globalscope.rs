@@ -37,6 +37,7 @@ use crate::dom::paintworkletglobalscope::PaintWorkletGlobalScope;
 use crate::dom::performance::Performance;
 use crate::dom::performanceobserver::VALID_ENTRY_TYPES;
 use crate::dom::promise::Promise;
+use crate::dom::readablestream::{ExternalUnderlyingSource, ReadableStream};
 use crate::dom::window::Window;
 use crate::dom::workerglobalscope::WorkerGlobalScope;
 use crate::dom::workletglobalscope::WorkletGlobalScope;
@@ -266,11 +267,19 @@ struct FileListener {
     task_canceller: TaskCanceller,
 }
 
-struct FileListenerCallback(Box<dyn Fn(Rc<Promise>, Result<Vec<u8>, Error>) + Send>);
+enum FileListenerCallback {
+    Promise(Box<dyn Fn(Rc<Promise>, Result<Vec<u8>, Error>) + Send>),
+    Stream,
+}
+
+enum FileListenerTarget {
+    Promise(TrustedPromise),
+    Stream(Trusted<ReadableStream>),
+}
 
 enum FileListenerState {
-    Empty(FileListenerCallback, TrustedPromise),
-    Receiving(Vec<u8>, FileListenerCallback, TrustedPromise),
+    Empty(FileListenerCallback, FileListenerTarget),
+    Receiving(Vec<u8>, FileListenerCallback, FileListenerTarget),
 }
 
 #[derive(JSTraceable, MallocSizeOf)]
@@ -479,57 +488,141 @@ impl MessageListener {
     }
 }
 
+/// Callback used to enqueue file chunks to streams as part of FileListener.
+fn stream_handle_incoming(stream: DomRoot<ReadableStream>, bytes: Result<Vec<u8>, Error>) {
+    match bytes {
+        Ok(b) => {
+            stream.enqueue_native(b);
+        },
+        Err(e) => {
+            stream.error_native(e);
+        },
+    }
+}
+
+/// Callback used to close streams as part of FileListener.
+fn stream_handle_eof(stream: DomRoot<ReadableStream>) {
+    stream.close_native();
+}
+
 impl FileListener {
     fn handle(&mut self, msg: FileManagerResult<ReadFileProgress>) {
         match msg {
             Ok(ReadFileProgress::Meta(blob_buf)) => match self.state.take() {
-                Some(FileListenerState::Empty(callback, promise)) => {
-                    self.state = Some(FileListenerState::Receiving(
-                        blob_buf.bytes,
-                        callback,
-                        promise,
-                    ));
+                Some(FileListenerState::Empty(callback, target)) => {
+                    let bytes = if let FileListenerTarget::Stream(ref trusted_stream) = target {
+                        let trusted = trusted_stream.clone();
+                        let callback = Box::new(stream_handle_incoming);
+
+                        let task = task!(enqueue_stream_chunk: move || {
+                            let stream = trusted.root();
+                            callback(stream, Ok(blob_buf.bytes));
+                        });
+
+                        let _ = self
+                            .task_source
+                            .queue_with_canceller(task, &self.task_canceller);
+                        Vec::with_capacity(0)
+                    } else {
+                        blob_buf.bytes
+                    };
+
+                    self.state = Some(FileListenerState::Receiving(bytes, callback, target));
                 },
                 _ => panic!(
                     "Unexpected FileListenerState when receiving ReadFileProgress::Meta msg."
                 ),
             },
             Ok(ReadFileProgress::Partial(mut bytes_in)) => match self.state.take() {
-                Some(FileListenerState::Receiving(mut bytes, callback, promise)) => {
-                    bytes.append(&mut bytes_in);
-                    self.state = Some(FileListenerState::Receiving(bytes, callback, promise));
+                Some(FileListenerState::Receiving(mut bytes, callback, target)) => {
+                    if let FileListenerTarget::Stream(ref trusted_stream) = target {
+                        let trusted = trusted_stream.clone();
+                        let callback = Box::new(stream_handle_incoming);
+
+                        let task = task!(enqueue_stream_chunk: move || {
+                            let stream = trusted.root();
+                            callback(stream, Ok(bytes_in));
+                        });
+
+                        let _ = self
+                            .task_source
+                            .queue_with_canceller(task, &self.task_canceller);
+                    } else {
+                        bytes.append(&mut bytes_in);
+                    };
+
+                    self.state = Some(FileListenerState::Receiving(bytes, callback, target));
                 },
                 _ => panic!(
                     "Unexpected FileListenerState when receiving ReadFileProgress::Partial msg."
                 ),
             },
             Ok(ReadFileProgress::EOF) => match self.state.take() {
-                Some(FileListenerState::Receiving(bytes, callback, trusted_promise)) => {
-                    let _ = self.task_source.queue_with_canceller(
-                        task!(resolve_promise: move || {
+                Some(FileListenerState::Receiving(bytes, callback, target)) => match target {
+                    FileListenerTarget::Promise(trusted_promise) => {
+                        let callback = match callback {
+                            FileListenerCallback::Promise(callback) => callback,
+                            _ => panic!("Expected promise callback."),
+                        };
+                        let task = task!(resolve_promise: move || {
                             let promise = trusted_promise.root();
                             let _ac = enter_realm(&*promise.global());
-                            callback.0(promise, Ok(bytes));
-                        }),
-                        &self.task_canceller,
-                    );
+                            callback(promise, Ok(bytes));
+                        });
+
+                        let _ = self
+                            .task_source
+                            .queue_with_canceller(task, &self.task_canceller);
+                    },
+                    FileListenerTarget::Stream(trusted_stream) => {
+                        let trusted = trusted_stream.clone();
+                        let callback = Box::new(stream_handle_eof);
+
+                        let task = task!(enqueue_stream_chunk: move || {
+                            let stream = trusted.root();
+                            callback(stream);
+                        });
+
+                        let _ = self
+                            .task_source
+                            .queue_with_canceller(task, &self.task_canceller);
+                    },
                 },
                 _ => {
                     panic!("Unexpected FileListenerState when receiving ReadFileProgress::EOF msg.")
                 },
             },
             Err(_) => match self.state.take() {
-                Some(FileListenerState::Receiving(_, callback, trusted_promise)) |
-                Some(FileListenerState::Empty(callback, trusted_promise)) => {
-                    let bytes = Err(Error::Network);
-                    let _ = self.task_source.queue_with_canceller(
-                        task!(reject_promise: move || {
-                            let promise = trusted_promise.root();
-                            let _ac = enter_realm(&*promise.global());
-                            callback.0(promise, bytes);
-                        }),
-                        &self.task_canceller,
-                    );
+                Some(FileListenerState::Receiving(_, callback, target)) |
+                Some(FileListenerState::Empty(callback, target)) => {
+                    let error = Err(Error::Network);
+
+                    match target {
+                        FileListenerTarget::Promise(trusted_promise) => {
+                            let callback = match callback {
+                                FileListenerCallback::Promise(callback) => callback,
+                                _ => panic!("Expected promise callback."),
+                            };
+                            let _ = self.task_source.queue_with_canceller(
+                                task!(reject_promise: move || {
+                                    let promise = trusted_promise.root();
+                                    let _ac = enter_realm(&*promise.global());
+                                    callback(promise, error);
+                                }),
+                                &self.task_canceller,
+                            );
+                        },
+                        FileListenerTarget::Stream(trusted_stream) => {
+                            let callback = Box::new(stream_handle_incoming);
+                            let _ = self.task_source.queue_with_canceller(
+                                task!(error_stream: move || {
+                                    let stream = trusted_stream.root();
+                                    callback(stream, error);
+                                }),
+                                &self.task_canceller,
+                            );
+                        },
+                    }
                 },
                 _ => panic!("Unexpected FileListenerState when receiving Err msg."),
             },
@@ -1433,6 +1526,76 @@ impl GlobalScope {
         }
     }
 
+    /// Get a slice to the inner data of a Blob,
+    /// if it's a memory blob, or it's file-id and file-size otherwise.
+    ///
+    /// Note: this is almost a duplicate of `get_blob_bytes`,
+    /// tweaked for integration with streams.
+    /// TODO: merge with `get_blob_bytes` by way of broader integration with blob streams.
+    pub fn get_blob_bytes_or_file_id(
+        &self,
+        blob_id: &BlobId,
+    ) -> (Option<Vec<u8>>, Option<(Uuid, u64)>) {
+        let parent = {
+            let blob_state = self.blob_state.borrow();
+            if let BlobState::Managed(blobs_map) = &*blob_state {
+                let blob_info = blobs_map
+                    .get(blob_id)
+                    .expect("get_blob_bytes_or_file_id for an unknown blob.");
+                match blob_info.blob_impl.blob_data() {
+                    BlobData::Sliced(ref parent, ref rel_pos) => {
+                        Some((parent.clone(), rel_pos.clone()))
+                    },
+                    _ => None,
+                }
+            } else {
+                panic!("get_blob_bytes_or_file_id called on a global not managing any blobs.");
+            }
+        };
+
+        match parent {
+            Some((parent_id, rel_pos)) => {
+                match self.get_blob_bytes_non_sliced_or_file_id(&parent_id) {
+                    (Some(v), None) => {
+                        let range = rel_pos.to_abs_range(v.len());
+                        return (Some(v.index(range).to_vec()), None);
+                    },
+                    res => res,
+                }
+            },
+            None => self.get_blob_bytes_non_sliced_or_file_id(blob_id),
+        }
+    }
+
+    /// Get bytes from a non-sliced blob if in memory, or it's file-id and file-size.
+    ///
+    /// Note: this is almost a duplicate of `get_blob_bytes_non_sliced`,
+    /// tweaked for integration with streams.
+    /// TODO: merge with `get_blob_bytes` by way of broader integration with blob streams.
+    fn get_blob_bytes_non_sliced_or_file_id(
+        &self,
+        blob_id: &BlobId,
+    ) -> (Option<Vec<u8>>, Option<(Uuid, u64)>) {
+        let blob_state = self.blob_state.borrow();
+        if let BlobState::Managed(blobs_map) = &*blob_state {
+            let blob_info = blobs_map
+                .get(blob_id)
+                .expect("get_blob_bytes_non_sliced_or_file_id called for a unknown blob.");
+            match blob_info.blob_impl.blob_data() {
+                BlobData::File(ref f) => match f.get_cache() {
+                    Some(bytes) => (Some(bytes.clone()), None),
+                    None => (None, Some((f.get_id(), f.get_size()))),
+                },
+                BlobData::Memory(ref s) => (Some(s.clone()), None),
+                BlobData::Sliced(_, _) => panic!("This blob doesn't have a parent."),
+            }
+        } else {
+            panic!(
+                "get_blob_bytes_non_sliced_or_file_id called on a global not managing any blobs."
+            );
+        }
+    }
+
     /// Get a copy of the type_string of a blob.
     pub fn get_blob_type_string(&self, blob_id: &BlobId) -> String {
         let blob_state = self.blob_state.borrow();
@@ -1637,6 +1800,56 @@ impl GlobalScope {
         GlobalScope::read_msg(recv)
     }
 
+    /// <https://w3c.github.io/FileAPI/#blob-get-stream>
+    pub fn get_blob_stream(&self, blob_id: &BlobId) -> DomRoot<ReadableStream> {
+        let (file_id, size) = match self.get_blob_bytes_or_file_id(blob_id) {
+            (Some(bytes), None) => {
+                let stream = ReadableStream::new_with_external_underlying_source(
+                    self,
+                    ExternalUnderlyingSource::Blob(bytes.len()),
+                );
+                // If we have all the bytes in memory, queue them and close the stream.
+                stream.enqueue_native(bytes);
+                stream.close_native();
+                return stream;
+            },
+            (None, Some((id, size))) => (id, size),
+            _ => panic!("get_blob_stream called on a global not managing the blob."),
+        };
+
+        let stream = ReadableStream::new_with_external_underlying_source(
+            self,
+            ExternalUnderlyingSource::Blob(size as usize),
+        );
+
+        let recv = self.send_msg(file_id);
+
+        let trusted_stream = Trusted::new(&*stream.clone());
+        let task_canceller = self.task_canceller(TaskSourceName::FileReading);
+        let task_source = self.file_reading_task_source();
+
+        let mut file_listener = FileListener {
+            state: Some(FileListenerState::Empty(
+                FileListenerCallback::Stream,
+                FileListenerTarget::Stream(trusted_stream),
+            )),
+            task_source,
+            task_canceller,
+        };
+
+        ROUTER.add_route(
+            recv.to_opaque(),
+            Box::new(move |msg| {
+                file_listener.handle(
+                    msg.to()
+                        .expect("Deserialization of file listener msg failed."),
+                );
+            }),
+        );
+
+        stream
+    }
+
     pub fn read_file_async(
         &self,
         id: Uuid,
@@ -1651,8 +1864,8 @@ impl GlobalScope {
 
         let mut file_listener = FileListener {
             state: Some(FileListenerState::Empty(
-                FileListenerCallback(callback),
-                trusted_promise,
+                FileListenerCallback::Promise(callback),
+                FileListenerTarget::Promise(trusted_promise),
             )),
             task_source,
             task_canceller,
@@ -1751,6 +1964,16 @@ impl GlobalScope {
         let global = CurrentGlobalOrNull(cx);
         assert!(!global.is_null());
         global_scope_from_global(global, cx)
+    }
+
+    /// Returns the global scope for the given SafeJSContext
+    #[allow(unsafe_code)]
+    pub fn from_safe_context(cx: SafeJSContext, _realm: InRealm) -> DomRoot<Self> {
+        unsafe {
+            let global = CurrentGlobalOrNull(*cx);
+            assert!(!global.is_null());
+            global_scope_from_global(global, *cx)
+        }
     }
 
     /// Returns the global object of the realm that the given JS object

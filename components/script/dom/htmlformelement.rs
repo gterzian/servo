@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+use crate::body::Extractable;
 use crate::dom::bindings::cell::DomRefCell;
 use crate::dom::bindings::codegen::Bindings::AttrBinding::AttrBinding::AttrMethods;
 use crate::dom::bindings::codegen::Bindings::BlobBinding::BlobMethods;
@@ -788,7 +789,11 @@ impl HTMLFormElement {
             },
         };
 
-        load_data.data = Some(bytes);
+        let global = self.global();
+
+        let request_body = bytes.extract(&global).into_net_request_body().0;
+        load_data.data = Some(request_body);
+
         self.plan_to_navigate(load_data, target);
     }
 

@@ -1169,7 +1169,8 @@ fn test_fetch_with_devtools() {
         url: url,
         method: Method::GET,
         headers: headers,
-        body: Some(vec![]),
+        // TODO: integrate body stream with devtools.
+        body: None,
         pipeline_id: TEST_PIPELINE_ID,
         startedDateTime: devhttprequest.startedDateTime,
         timeStamp: devhttprequest.timeStamp,

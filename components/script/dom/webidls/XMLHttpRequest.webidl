@@ -13,7 +13,7 @@
  */
 
 // https://fetch.spec.whatwg.org/#bodyinit
-typedef (Blob or BufferSource or FormData or DOMString or URLSearchParams) BodyInit;
+typedef (Blob or BufferSource or FormData or DOMString or URLSearchParams or ReadableStream) BodyInit;
 
 enum XMLHttpRequestResponseType {
   "",
@@ -21,7 +21,8 @@ enum XMLHttpRequestResponseType {
   "blob",
   "document",
   "json",
-  "text"
+  "text",
+  "readablestream",
 };
 
 [Exposed=(Window,Worker)]

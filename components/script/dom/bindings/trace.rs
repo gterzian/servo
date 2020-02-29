@@ -186,6 +186,7 @@ unsafe_no_jsmanaged_fields!(&'static Encoding);
 
 unsafe_no_jsmanaged_fields!(RefCell<Decoder>);
 unsafe_no_jsmanaged_fields!(RefCell<Vec<u8>>);
+unsafe_no_jsmanaged_fields!(RefCell<bool>);
 
 unsafe_no_jsmanaged_fields!(Reflector);
 
