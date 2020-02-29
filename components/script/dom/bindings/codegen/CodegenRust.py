@@ -920,18 +920,14 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
     if type.isReadableStream():
         assert not isEnforceRange and not isClamp
 
-        templateBody = '''
-        use js::friendapi::UnwrapReadableStream;
-        UnwrapReadableStream(${val}.get().to_object())
-        '''
+        templateBody = "${val}.get().to_object()"
         default = "ptr::null_mut()"
 
         if isMember in ("Dictionary", "Union"):
-            templateBody = "RootedTraceableBox::from_box(Heap::boxed(%s))" % templateBody
-            default = "RootedTraceableBox::new(Heap::default())"
-            declType = CGGeneric("RootedTraceableBox<Heap<*mut JSObject>>")
-        else:
-            declType = CGGeneric("RootedTraceableBox<Heap<*mut JSObject>>")
+            templateBody = "*Heap::boxed(%s)" % templateBody
+            default = "Heap::default()"
+
+        declType = CGGeneric("Heap<*mut JSObject>")
 
         templateBody = wrapObjectTemplate(templateBody, default,
                                           isDefinitelyObject, type, failureCode)
