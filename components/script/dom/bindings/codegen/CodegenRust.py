@@ -920,20 +920,34 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
     if type.isReadableStream():
         assert not isEnforceRange and not isClamp
 
-        templateBody = "${val}.get().to_object()"
-        default = "ptr::null_mut()"
+        if failureCode is None:
+            unwrapFailureCode = '''throw_type_error(*cx, "This object is not
+                    an instance of ReadableStream.");\n'''
+        else:
+            unwrapFailureCode = failureCode
 
-        if isMember in ("Dictionary", "Union"):
-            templateBody = "*Heap::boxed(%s)" % templateBody
-            default = "Heap::default()"
+        templateBody = fill(
+            """
+            {
+                match ReadableStream::from_js(cx, $${val}.get().to_object()) {
+                    Ok(val) => val,
+                    Err(_) => {
+                    $*{failureCode}
+                    }
+                }
 
-        declType = CGGeneric("Heap<*mut JSObject>")
+            }
+            """,
+            failureCode=unwrapFailureCode + "\n",
+        )
 
-        templateBody = wrapObjectTemplate(templateBody, default,
+        templateBody = wrapObjectTemplate(templateBody, "None",
                                           isDefinitelyObject, type, failureCode)
 
+        declType = CGGeneric("Rc<ReadableStream>")
+
         return handleOptional(templateBody, declType,
-                              handleDefault(default))
+                              handleDefault("None"))
 
     elif type.isSpiderMonkeyInterface():
         raise TypeError("Can't handle SpiderMonkey interface arguments other than typed arrays yet")
@@ -4404,7 +4418,7 @@ def getUnionTypeTemplateVars(type, descriptorProvider):
         typeName = "Heap<*mut JSObject>"
     elif type.isReadableStream():
         name = type.name
-        typeName = "Heap<*mut JSObject>"
+        typeName = "Rc<ReadableStream>"
     elif is_typed_array(type):
         name = type.name
         typeName = "typedarray::Heap" + name
