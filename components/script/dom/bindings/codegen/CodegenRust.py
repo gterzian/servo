@@ -927,13 +927,11 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
         default = "ptr::null_mut()"
 
         if isMember in ("Dictionary", "Union"):
-            templateBody = "*Heap::boxed(%s)" % templateBody
-            default = "Heap::default()"
-            declType = CGGeneric("Heap<*mut JSObject>")
+            templateBody = "RootedTraceableBox::from_box(Heap::boxed(%s))" % templateBody
+            default = "RootedTraceableBox::new(Heap::default())"
+            declType = CGGeneric("RootedTraceableBox<Heap<*mut JSObject>>")
         else:
-            # TODO: Need to root somehow
-            # https://github.com/servo/servo/issues/6382
-            declType = CGGeneric("*mut JSObject")
+            declType = CGGeneric("RootedTraceableBox<Heap<*mut JSObject>>")
 
         templateBody = wrapObjectTemplate(templateBody, default,
                                           isDefinitelyObject, type, failureCode)
