@@ -30,6 +30,7 @@ use crate::dom::htmlformelement::{encode_multipart_form_data, generate_boundary}
 use crate::dom::node::Node;
 use crate::dom::performanceresourcetiming::InitiatorType;
 use crate::dom::progressevent::ProgressEvent;
+use crate::dom::promisenativehandler::{Callback, PromiseNativeHandler};
 use crate::dom::servoparser::ServoParser;
 use crate::dom::urlsearchparams::URLSearchParams;
 use crate::dom::window::Window;
@@ -1563,36 +1564,43 @@ impl XHRTimeoutCallback {
 }
 
 pub trait Extractable {
-    fn extract(&self) -> (Vec<u8>, Option<DOMString>);
+    fn extract(&self) -> (Rc<ReadableStream>, Option<DOMString>);
 }
 
 impl Extractable for Blob {
-    fn extract(&self) -> (Vec<u8>, Option<DOMString>) {
+    fn extract(&self) -> (Rc<ReadableStream>, Option<DOMString>) {
+        // TODO: use a stream with a native underlying source.
         let content_type = if self.Type().as_ref().is_empty() {
             None
         } else {
             Some(self.Type())
         };
         let bytes = self.get_bytes().unwrap_or(vec![]);
-        (bytes, content_type)
+        (
+            ReadableStream::new_with_external_underlying_source(bytes),
+            content_type,
+        )
     }
 }
 
 impl Extractable for DOMString {
-    fn extract(&self) -> (Vec<u8>, Option<DOMString>) {
+    fn extract(&self) -> (Rc<ReadableStream>, Option<DOMString>) {
+        // TODO: use a stream with a native underlying source.
+        let bytes = self.as_bytes().to_owned();
         (
-            self.as_bytes().to_owned(),
+            ReadableStream::new_with_external_underlying_source(bytes),
             Some(DOMString::from("text/plain;charset=UTF-8")),
         )
     }
 }
 
 impl Extractable for FormData {
-    fn extract(&self) -> (Vec<u8>, Option<DOMString>) {
+    fn extract(&self) -> (Rc<ReadableStream>, Option<DOMString>) {
+        // TODO: use a stream with a native underlying source.
         let boundary = generate_boundary();
         let bytes = encode_multipart_form_data(&mut self.datums(), boundary.clone(), UTF_8);
         (
-            bytes,
+            ReadableStream::new_with_external_underlying_source(bytes),
             Some(DOMString::from(format!(
                 "multipart/form-data;boundary={}",
                 boundary
@@ -1602,9 +1610,11 @@ impl Extractable for FormData {
 }
 
 impl Extractable for URLSearchParams {
-    fn extract(&self) -> (Vec<u8>, Option<DOMString>) {
+    fn extract(&self) -> (Rc<ReadableStream>, Option<DOMString>) {
+        // TODO: use a stream with a native underlying source.
+        let bytes = self.serialize_utf8().into_bytes();
         (
-            self.serialize_utf8().into_bytes(),
+            ReadableStream::new_with_external_underlying_source(bytes),
             Some(DOMString::from(
                 "application/x-www-form-urlencoded;charset=UTF-8",
             )),
@@ -1620,17 +1630,50 @@ fn serialize_document(doc: &Document) -> Fallible<DOMString> {
     }
 }
 
+#[derive(Clone)]
+struct BodyHandler {
+    body_sender: IpcSender<Vec<u8>>,
+    promise: Rc<Promise>,
+}
+
+impl BodyHandler {
+    pub fn new(body_sender: IpcSender<Vec<u8>>, promise: Rc<Promise>) -> Box<BodyHandler> {
+        Box::new(BodyHandler {
+            body_sender,
+            promise,
+        })
+    }
+
+    pub fn setup_native_handler(&self) {
+        let body_handler = Box::new(self.clone());
+
+        let handler = PromiseNativeHandler::new(&self.global(), Some(body_handler), None);
+
+        self.promise.append_native_handler(&handler);
+    }
+}
+
+impl Callback for BodyHandler {
+    fn callback(&self, _cx: *mut JSContext, v: HandleValue) {
+        // 1: Send chunks over IPC.
+        // 2: If reader is not done, read another chunk from the stream.
+    }
+}
+
 impl Extractable for BodyInit {
     // https://fetch.spec.whatwg.org/#concept-bodyinit-extract
-    fn extract(&self) -> (Vec<u8>, Option<DOMString>) {
+    fn extract(&self) -> (Rc<ReadableStream>, Option<DOMString>) {
         match *self {
             BodyInit::String(ref s) => s.extract(),
             BodyInit::URLSearchParams(ref usp) => usp.extract(),
             BodyInit::Blob(ref b) => b.extract(),
             BodyInit::FormData(ref formdata) => formdata.extract(),
-            BodyInit::ArrayBuffer(ref typedarray) => ((typedarray.to_vec(), None)),
-            BodyInit::ArrayBufferView(ref typedarray) => ((typedarray.to_vec(), None)),
-            BodyInit::ReadableStream(_) => (Vec::with_capacity(0), None),
+            BodyInit::ArrayBuffer(ref typedarray) | BodyInit::ArrayBufferView(ref typedarray) => {
+                let bytes = typedarray.to_vec();
+                let stream = ReadableStream::new_with_external_underlying_source(bytes);
+                (stream, None)
+            },
+            BodyInit::ReadableStream(stream) => (stream, None),
         }
     }
 }

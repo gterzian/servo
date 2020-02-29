@@ -23,7 +23,7 @@ use crate::dom::bindings::trace::RootedTraceableBox;
 use crate::dom::globalscope::GlobalScope;
 use crate::dom::headers::{Guard, Headers};
 use crate::dom::promise::Promise;
-use crate::dom::xmlhttprequest::Extractable;
+use crate::dom::xmlhttprequest::{BodyHandler, Extractable};
 use dom_struct::dom_struct;
 use http::header::{HeaderName, HeaderValue};
 use http::method::InvalidMethod;
@@ -386,7 +386,7 @@ impl Request {
         // Step 33
         let mut input_body = if let RequestInfo::Request(ref input_request) = input {
             let input_request_request = input_request.request.borrow();
-            input_request_request.body.clone()
+            input_request_request.body.take()
         } else {
             None
         };
@@ -418,8 +418,16 @@ impl Request {
 
             // Step 36.3
             let extracted_body_tmp = init_body.extract();
-            input_body = Some(extracted_body_tmp.0);
+            let stream = Some(extracted_body_tmp.0);
             let content_type = extracted_body_tmp.1;
+
+            let (body_sender, body_receiver) = ipc::channel().unwrap();
+            let promise = stream.read_a_chunk();
+
+            let body_handler = BodyHandler::new(body_sender, promise);
+            body_handler.setup_native_handler();
+
+            input_body = Some(body_receiver);
 
             // Step 36.4
             if let Some(contents) = content_type {

@@ -7,6 +7,7 @@ use crate::ResourceTimingType;
 use content_security_policy::{self as csp, CspList};
 use http::HeaderMap;
 use hyper::Method;
+use ipc_channel::ipc::IpcReceiver;
 use mime::Mime;
 use msg::constellation_msg::PipelineId;
 use servo_url::{ImmutableOrigin, ServoUrl};
@@ -130,7 +131,7 @@ pub struct RequestBuilder {
     #[ignore_malloc_size_of = "Defined in hyper"]
     pub headers: HeaderMap,
     pub unsafe_request: bool,
-    pub body: Option<Vec<u8>>,
+    pub body: Option<IpcReceiver<Vec<u8>>>,
     pub service_workers_mode: ServiceWorkersMode,
     // TODO: client object
     pub destination: Destination,
@@ -329,7 +330,7 @@ pub struct Request {
     /// <https://fetch.spec.whatwg.org/#unsafe-request-flag>
     pub unsafe_request: bool,
     /// <https://fetch.spec.whatwg.org/#concept-request-body>
-    pub body: Option<Vec<u8>>,
+    pub body: Option<IpcReceiver<Vec<u8>>>,
     // TODO: client object
     pub window: Window,
     // TODO: target browsing context

@@ -53,6 +53,8 @@ pub struct ReadableStream {
     reflector_: Reflector,
     #[ignore_malloc_size_of = "SM handles JS values"]
     permanent_js_root: Heap<JSVal>,
+    /// This should be an object implementing `js::jsapi::ReadableStreamUnderlyingSource`.
+    external_underlying_source: Option<Vec<u8>>,
 }
 
 impl ReadableStream {
@@ -66,6 +68,7 @@ impl ReadableStream {
             let stream = ReadableStream {
                 reflector_: Reflector::new(),
                 permanent_js_root: Heap::default(),
+                external_underlying_source: None,
             };
             let mut stream = Rc::new(stream);
 
@@ -74,4 +77,18 @@ impl ReadableStream {
             Ok(stream)
         }
     }
+
+    /// Build a stream backed by a Rust underlying source.
+    /// TODO: use an actual Rust underlying source to provide data asynchronously,
+    /// see `js::jsapi::ReadableStreamUnderlyingSource`.
+    pub fn new_with_external_underlying_source(source: Vec<u8>) -> Rc<ReadableStream> {
+        let stream = ReadableStream {
+            reflector_: Reflector::new(),
+            permanent_js_root: Heap::default(),
+            external_underlying_source: Some(source),
+        };
+        Rc::new(stream)
+    }
+
+    pub fn read_a_chunk(&self) -> Rc<Promise> {}
 }
