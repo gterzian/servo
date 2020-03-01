@@ -3,16 +3,18 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use crate::dom::bindings::reflector::{DomObject, MutDomObject, Reflector};
+use crate::dom::bindings::utils::set_dictionary_property;
 use crate::dom::bindings::utils::AsCCharPtrPtr;
 use crate::dom::promise::Promise;
 use crate::script_runtime::JSContext as SafeJSContext;
 use dom_struct::dom_struct;
 use js::jsapi::{
-    AddRawValueRoot, Heap, IsReadableStream, JSObject, ReadableStreamGetReader,
-    ReadableStreamReaderMode, RemoveRawValueRoot, UnwrapReadableStream,
+    AddRawValueRoot, Heap, IsReadableStream, JSObject, JS_NewObject,
+    ReadableStreamDefaultReaderRead, ReadableStreamGetReader, ReadableStreamIsDisturbed,
+    ReadableStreamIsLocked, ReadableStreamReaderMode, RemoveRawValueRoot, UnwrapReadableStream,
 };
 use js::jsval::{JSVal, ObjectValue};
-use js::rust::Runtime;
+use js::rust::{IntoHandle, Runtime};
 use std::rc::Rc;
 
 /// Private helper to enable adding new methods to Rc<ReadableStream>.
@@ -96,7 +98,39 @@ impl ReadableStream {
         self.external_underlying_source.clone()
     }
 
+    #[allow(unsafe_code)]
     pub fn read_a_chunk(&self) -> Rc<Promise> {
-        Promise::new(&self.global())
+        let cx = self.global().get_cx();
+
+        unsafe {
+            rooted!(in(*cx) let stream = self.permanent_js_root.get().to_object());
+
+            rooted!(in(*cx) let reader = ReadableStreamGetReader(
+                *cx,
+                stream.handle().into_handle(),
+                ReadableStreamReaderMode::Default,
+            ));
+
+            rooted!(in(*cx) let promise_obj = ReadableStreamDefaultReaderRead(
+                *cx,
+                reader.handle().into_handle(),
+            ));
+
+            Promise::new_with_js_promise(promise_obj.handle(), cx)
+        }
+    }
+
+    #[allow(unsafe_code)]
+    pub fn is_locked_or_disturbed(&self) -> bool {
+        let cx = self.global().get_cx();
+        let mut locked_or_disturbed = false;
+
+        unsafe {
+            rooted!(in(*cx) let stream = self.permanent_js_root.get().to_object());
+            ReadableStreamIsLocked(*cx, stream.handle().into_handle(), &mut locked_or_disturbed);
+            ReadableStreamIsDisturbed(*cx, stream.handle().into_handle(), &mut locked_or_disturbed);
+        }
+
+        locked_or_disturbed
     }
 }
