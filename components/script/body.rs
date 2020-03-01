@@ -49,7 +49,7 @@ use std::str;
 use url::form_urlencoded;
 
 struct BodyConnectHandler {
-    promise: Option<TrustedPromise>,
+    stream: Option<Trusted<ReadableStream>>,
     global: Trusted<GlobalScope>,
     task_source: NetworkingTaskSource,
     canceller: TaskCanceller,
@@ -57,33 +57,34 @@ struct BodyConnectHandler {
 
 impl BodyConnectHandler {
     pub fn new(
-        promise: TrustedPromise,
+        stream: Trusted<ReadableStream>,
         global: Trusted<GlobalScope>,
         task_source: NetworkingTaskSource,
         canceller: TaskCanceller,
     ) -> BodyConnectHandler {
         BodyConnectHandler {
-            promise: Some(promise),
+            stream: Some(stream),
             global,
             task_source,
             canceller,
         }
     }
 
-    pub fn setup_native_handler(&mut self, bytes_sender: IpcSender<Vec<u8>>) {
+    pub fn start_reading_from_stream(&mut self, bytes_sender: IpcSender<Vec<u8>>) {
         let global = self.global.clone();
-        let promise = match self.promise.take() {
-            Some(promise) => promise,
-            None => return warn!("setup_native_handler called multiple times."),
+        let stream = match self.stream.take() {
+            Some(stream) => stream,
+            None => return warn!("start_reading_from_stream called multiple times."),
         };
 
         let _ = self.task_source.queue_with_canceller(
             task!(setup_native_body_promise_handler: move || {
-                let promise = promise.root();
+                let rooted_stream = stream.root();
+                let promise = rooted_stream.read_a_chunk();
 
                 let promise_handler = Box::new(BodyPromiseHandler {
                     bytes_sender,
-                    promise: promise.clone(),
+                    stream: rooted_stream,
                 });
 
                 let handler = PromiseNativeHandler::new(&global.root(), Some(promise_handler), None);
@@ -98,8 +99,7 @@ impl BodyConnectHandler {
 struct BodyPromiseHandler {
     #[ignore_malloc_size_of = "Channels are hard"]
     bytes_sender: IpcSender<Vec<u8>>,
-    #[ignore_malloc_size_of = "Rc"]
-    promise: Rc<Promise>,
+    stream: DomRoot<ReadableStream>,
 }
 
 impl Callback for BodyPromiseHandler {
@@ -129,20 +129,20 @@ impl ExtractedBody {
         } = self;
 
         let (stream_connect_sender, stream_connect_receiver) = ipc::channel().unwrap();
-        let promise = TrustedPromise::new(stream.read_a_chunk());
+        let trusted_stream = Trusted::new(&*stream);
         let trusted_global = Trusted::new(global);
 
         let task_source = global.networking_task_source();
         let canceller = global.task_canceller(TaskSourceName::Networking);
 
         let mut body_handler =
-            BodyConnectHandler::new(promise, trusted_global, task_source, canceller);
+            BodyConnectHandler::new(trusted_stream, trusted_global, task_source, canceller);
 
         ROUTER.add_route(
             stream_connect_receiver.to_opaque(),
             Box::new(move |message| {
                 let bytes_sender = message.to().unwrap();
-                body_handler.setup_native_handler(bytes_sender);
+                body_handler.start_reading_from_stream(bytes_sender);
             }),
         );
 
