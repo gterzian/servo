@@ -7,7 +7,7 @@ use crate::ResourceTimingType;
 use content_security_policy::{self as csp, CspList};
 use http::HeaderMap;
 use hyper::Method;
-use ipc_channel::ipc::IpcReceiver;
+use ipc_channel::ipc::IpcSender;
 use mime::Mime;
 use msg::constellation_msg::PipelineId;
 use servo_url::{ImmutableOrigin, ServoUrl};
@@ -115,6 +115,46 @@ pub enum ParserMetadata {
     NotParserInserted,
 }
 
+/// <https://fetch.spec.whatwg.org/#concept-body-source>
+#[derive(Clone, Debug, Deserialize, MallocSizeOf, Serialize)]
+pub enum BodySource {
+    Null,
+    Blob,
+    BufferSource,
+    FormData,
+    URLSearchParams,
+    USVString,
+}
+
+/// <https://fetch.spec.whatwg.org/#bodies>
+#[derive(Clone, Debug, Deserialize, MallocSizeOf, Serialize)]
+pub struct RequestBody {
+    #[ignore_malloc_size_of = "Channels are hard"]
+    pub stream: IpcSender<IpcSender<Vec<u8>>>,
+    pub source: BodySource,
+    pub transmitted_bytes: u64,
+    pub total_bytes: usize,
+}
+
+impl RequestBody {
+    pub fn source_is_null(&self) -> bool {
+        if let BodySource::Null = self.source {
+            return true;
+        }
+        false
+    }
+
+    pub fn connect(&self, sender: IpcSender<Vec<u8>>) {
+        self.stream
+            .send(sender)
+            .expect("Failed to connect to request body stream.");
+    }
+
+    pub fn len(&self) -> usize {
+        self.total_bytes
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, MallocSizeOf, Serialize)]
 pub struct RequestBuilder {
     #[serde(
@@ -131,7 +171,7 @@ pub struct RequestBuilder {
     #[ignore_malloc_size_of = "Defined in hyper"]
     pub headers: HeaderMap,
     pub unsafe_request: bool,
-    pub body: Option<IpcReceiver<Vec<u8>>>,
+    pub body: Option<RequestBody>,
     pub service_workers_mode: ServiceWorkersMode,
     // TODO: client object
     pub destination: Destination,
@@ -208,7 +248,7 @@ impl RequestBuilder {
         self
     }
 
-    pub fn body(mut self, body: Option<Vec<u8>>) -> RequestBuilder {
+    pub fn body(mut self, body: Option<RequestBody>) -> RequestBuilder {
         self.body = body;
         self
     }
@@ -330,7 +370,7 @@ pub struct Request {
     /// <https://fetch.spec.whatwg.org/#unsafe-request-flag>
     pub unsafe_request: bool,
     /// <https://fetch.spec.whatwg.org/#concept-request-body>
-    pub body: Option<IpcReceiver<Vec<u8>>>,
+    pub body: Option<RequestBody>,
     // TODO: client object
     pub window: Window,
     // TODO: target browsing context

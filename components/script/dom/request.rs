@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 use crate::body::{consume_body, BodyOperations, BodyType};
+use crate::body::{Extractable, ExtractedBody};
 use crate::dom::bindings::cell::{DomRefCell, Ref};
 use crate::dom::bindings::codegen::Bindings::HeadersBinding::{HeadersInit, HeadersMethods};
 use crate::dom::bindings::codegen::Bindings::RequestBinding;
@@ -23,19 +24,24 @@ use crate::dom::bindings::trace::RootedTraceableBox;
 use crate::dom::globalscope::GlobalScope;
 use crate::dom::headers::{Guard, Headers};
 use crate::dom::promise::Promise;
-use crate::dom::xmlhttprequest::{BodyHandler, Extractable};
+use crate::dom::readablestream::ReadableStream;
+use crate::task_source::TaskSourceName;
 use dom_struct::dom_struct;
 use http::header::{HeaderName, HeaderValue};
 use http::method::InvalidMethod;
 use http::Method as HttpMethod;
+use ipc_channel::ipc::{self, IpcSender};
+use ipc_channel::router::ROUTER;
+use js::jsapi::JSContext;
+use js::rust::HandleValue;
 use net_traits::request::CacheMode as NetTraitsRequestCache;
 use net_traits::request::CredentialsMode as NetTraitsRequestCredentials;
 use net_traits::request::Destination as NetTraitsRequestDestination;
 use net_traits::request::RedirectMode as NetTraitsRequestRedirect;
 use net_traits::request::Referrer as NetTraitsRequestReferrer;
-use net_traits::request::Request as NetTraitsRequest;
 use net_traits::request::RequestMode as NetTraitsRequestMode;
 use net_traits::request::{Origin, Window};
+use net_traits::request::{Request as NetTraitsRequest, RequestBody};
 use net_traits::ReferrerPolicy as MsgReferrerPolicy;
 use servo_url::ServoUrl;
 use std::cell::Cell;
@@ -47,6 +53,8 @@ pub struct Request {
     reflector_: Reflector,
     request: DomRefCell<NetTraitsRequest>,
     body_used: Cell<bool>,
+    #[ignore_malloc_size_of = "Rc"]
+    js_body: DomRefCell<Option<Rc<ReadableStream>>>,
     headers: MutNullableDom<Headers>,
     mime_type: DomRefCell<Vec<u8>>,
     #[ignore_malloc_size_of = "Rc"]
@@ -59,6 +67,7 @@ impl Request {
             reflector_: Reflector::new(),
             request: DomRefCell::new(net_request_from_global(global, url)),
             body_used: Cell::new(false),
+            js_body: DomRefCell::new(None),
             headers: Default::default(),
             mime_type: DomRefCell::new("".to_string().into_bytes()),
             body_promise: DomRefCell::new(None),
@@ -77,7 +86,7 @@ impl Request {
     #[allow(non_snake_case)]
     pub fn Constructor(
         global: &GlobalScope,
-        input: RequestInfo,
+        mut input: RequestInfo,
         init: RootedTraceableBox<RequestInit>,
     ) -> Fallible<DomRoot<Request>> {
         // Step 1
@@ -384,8 +393,8 @@ impl Request {
         r.request.borrow_mut().headers = r.Headers().get_headers_list();
 
         // Step 33
-        let mut input_body = if let RequestInfo::Request(ref input_request) = input {
-            let input_request_request = input_request.request.borrow();
+        let mut input_body = if let RequestInfo::Request(ref mut input_request) = input {
+            let mut input_request_request = input_request.request.borrow_mut();
             input_request_request.body.take()
         } else {
             None
@@ -417,20 +426,10 @@ impl Request {
             // Step 36.2 TODO "If init["keepalive"] exists and is true..."
 
             // Step 36.3
-            let extracted_body_tmp = init_body.extract();
-            let stream = Some(extracted_body_tmp.0);
-            let content_type = extracted_body_tmp.1;
-
-            let (body_sender, body_receiver) = ipc::channel().unwrap();
-            let promise = stream.read_a_chunk();
-
-            let body_handler = BodyHandler::new(body_sender, promise);
-            body_handler.setup_native_handler();
-
-            input_body = Some(body_receiver);
+            let mut extracted_body = init_body.extract();
 
             // Step 36.4
-            if let Some(contents) = content_type {
+            if let Some(contents) = extracted_body.content_type.take() {
                 let ct_header_name = b"Content-Type";
                 if !r
                     .Headers()
@@ -454,6 +453,10 @@ impl Request {
                     }
                 }
             }
+
+            let (net_body, js_body) = extracted_body.into_request_body(global);
+            *r.js_body.borrow_mut() = Some(js_body);
+            input_body = Some(net_body);
         }
 
         // Step 37 "TODO if body is non-null and body's source is null..."
@@ -711,9 +714,12 @@ impl BodyOperations for Request {
     }
 
     fn take_body(&self) -> Option<Vec<u8>> {
-        let mut request = self.request.borrow_mut();
-        let body = request.body.take();
-        Some(body.unwrap_or(vec![]))
+        let js_body = self.js_body.borrow_mut().take();
+        Some(
+            js_body
+                .and_then(|stream| stream.clone_body())
+                .unwrap_or(vec![]),
+        )
     }
 
     fn get_mime_type(&self) -> Ref<Vec<u8>> {

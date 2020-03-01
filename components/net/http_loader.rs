@@ -29,12 +29,16 @@ use http::header::{self, HeaderName, HeaderValue};
 use http::{HeaderMap, Request as HyperRequest};
 use hyper::{Body, Client, Method, Response as HyperResponse, StatusCode};
 use hyper_serde::Serde;
+use ipc_channel::ipc;
+use ipc_channel::router::ROUTER;
 use msg::constellation_msg::{HistoryStateId, PipelineId};
 use net_traits::quality::{quality_to_value, Quality, QualityItem};
 use net_traits::request::Origin::Origin as SpecificOrigin;
 use net_traits::request::{is_cors_safelisted_method, is_cors_safelisted_request_header};
 use net_traits::request::{CacheMode, CredentialsMode, Destination, Origin};
-use net_traits::request::{RedirectMode, Referrer, Request, RequestBuilder, RequestMode};
+use net_traits::request::{
+    RedirectMode, Referrer, Request, RequestBody, RequestBuilder, RequestMode,
+};
 use net_traits::request::{ResponseTainting, ServiceWorkersMode};
 use net_traits::response::{HttpsState, Response, ResponseBody, ResponseType};
 use net_traits::{CookieSource, FetchMetadata, NetworkError, ReferrerPolicy};
@@ -53,6 +57,7 @@ use std::time::{Duration, SystemTime};
 use time::{self, Tm};
 use tokio::prelude::{future, Future, Stream};
 use tokio::runtime::Runtime;
+use tokio::sync::mpsc::unbounded_channel;
 
 lazy_static! {
     pub static ref HANDLE: Mutex<Runtime> = { Mutex::new(Runtime::new().unwrap()) };
@@ -358,7 +363,7 @@ fn obtain_response(
     url: &ServoUrl,
     method: &Method,
     request_headers: &HeaderMap,
-    data: &Option<Vec<u8>>,
+    body: &Option<RequestBody>,
     load_data_method: &Method,
     pipeline_id: &Option<PipelineId>,
     iters: u32,
@@ -380,19 +385,38 @@ fn obtain_response(
     //
     // https://tools.ietf.org/html/rfc7231#section-6.4
     let is_redirected_request = iters != 1;
-    let request_body;
-    match data {
+
+    let request_body = match body {
         &Some(ref d) if !is_redirected_request => {
             headers.typed_insert(ContentLength(d.len() as u64));
-            request_body = d.clone();
+            let (body_chan, body_port) = ipc::channel().unwrap();
+            d.connect(body_chan);
+
+            let (mut sender, receiver) = unbounded_channel();
+
+            ROUTER.add_route(
+                body_port.to_opaque(),
+                Box::new(move |message| {
+                    let bytes: Vec<u8> = message.to().unwrap();
+                    if sender.try_send(bytes).is_err() {
+                        warn!("Failed to forward bytes from script stream to net body.");
+                    }
+                }),
+            );
+
+            receiver
         },
         _ => {
             if *load_data_method != Method::GET && *load_data_method != Method::HEAD {
                 headers.typed_insert(ContentLength(0))
             }
-            request_body = vec![];
+            let (_sender, mut receiver) = unbounded_channel();
+
+            receiver.close();
+
+            receiver
         },
-    }
+    };
 
     context
         .timing
@@ -420,7 +444,7 @@ fn obtain_response(
                 .replace("{", "%7B")
                 .replace("}", "%7D"),
         )
-        .body(request_body.clone().into());
+        .body(Body::wrap_stream(request_body));
 
     // TODO: We currently don't know when the handhhake before the connection is done
     // so our best bet would be to set `secure_connection_start` here when we are currently
@@ -467,7 +491,8 @@ fn obtain_response(
                             closure_url,
                             method.clone(),
                             headers,
-                            Some(request_body.clone()),
+                            // TODO: integrate with RequestBody.
+                            None,
                             pipeline_id,
                             time::now(),
                             connect_end - connect_start,
@@ -783,7 +808,7 @@ pub fn http_redirect_fetch(
         .status
         .as_ref()
         .map_or(true, |s| s.0 != StatusCode::SEE_OTHER) &&
-        request.body.as_ref().map_or(false, |b| b.is_empty())
+        request.body.as_ref().map_or(false, |b| b.source_is_null())
     {
         return Response::network_error(NetworkError::Internal("Request body is not done".into()));
     }

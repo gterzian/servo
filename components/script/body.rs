@@ -3,19 +3,34 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 use crate::dom::bindings::cell::Ref;
+use crate::dom::bindings::codegen::Bindings::BlobBinding::BlobBinding::BlobMethods;
 use crate::dom::bindings::codegen::Bindings::FormDataBinding::FormDataMethods;
+use crate::dom::bindings::codegen::Bindings::XMLHttpRequestBinding::BodyInit;
 use crate::dom::bindings::error::{Error, Fallible};
+use crate::dom::bindings::refcounted::{Trusted, TrustedPromise};
 use crate::dom::bindings::reflector::DomObject;
 use crate::dom::bindings::root::DomRoot;
-use crate::dom::bindings::str::USVString;
+use crate::dom::bindings::str::{is_token, ByteString, DOMString, USVString};
 use crate::dom::bindings::trace::RootedTraceableBox;
 use crate::dom::blob::{normalize_type_string, Blob};
 use crate::dom::formdata::FormData;
 use crate::dom::globalscope::GlobalScope;
+use crate::dom::htmlformelement::{encode_multipart_form_data, generate_boundary};
 use crate::dom::promise::Promise;
+use crate::dom::promisenativehandler::{Callback, PromiseNativeHandler};
+use crate::dom::readablestream::ReadableStream;
+use crate::dom::urlsearchparams::URLSearchParams;
 use crate::realms::{AlreadyInRealm, InRealm};
 use crate::script_runtime::JSContext;
+use crate::task::TaskCanceller;
+use crate::task_source::networking::NetworkingTaskSource;
+use crate::task_source::TaskSource;
+use crate::task_source::TaskSourceName;
+use encoding_rs::{Encoding, UTF_8};
+use ipc_channel::ipc::{self, IpcSender};
+use ipc_channel::router::ROUTER;
 use js::jsapi::Heap;
+use js::jsapi::JSContext as UnSafeJSContext;
 use js::jsapi::JSObject;
 use js::jsapi::JS_ClearPendingException;
 use js::jsapi::Value as JSValue;
@@ -23,13 +38,252 @@ use js::jsval::JSVal;
 use js::jsval::UndefinedValue;
 use js::rust::wrappers::JS_GetPendingException;
 use js::rust::wrappers::JS_ParseJSON;
+use js::rust::HandleValue;
 use js::typedarray::{ArrayBuffer, CreateWith};
 use mime::{self, Mime};
+use net_traits::request::{BodySource, RequestBody};
 use script_traits::serializable::BlobImpl;
 use std::ptr;
 use std::rc::Rc;
 use std::str;
 use url::form_urlencoded;
+
+struct BodyConnectHandler {
+    promise: Option<TrustedPromise>,
+    global: Trusted<GlobalScope>,
+    task_source: NetworkingTaskSource,
+    canceller: TaskCanceller,
+}
+
+impl BodyConnectHandler {
+    pub fn new(
+        promise: TrustedPromise,
+        global: Trusted<GlobalScope>,
+        task_source: NetworkingTaskSource,
+        canceller: TaskCanceller,
+    ) -> BodyConnectHandler {
+        BodyConnectHandler {
+            promise: Some(promise),
+            global,
+            task_source,
+            canceller,
+        }
+    }
+
+    pub fn setup_native_handler(&mut self, bytes_sender: IpcSender<Vec<u8>>) {
+        let global = self.global.clone();
+        let promise = match self.promise.take() {
+            Some(promise) => promise,
+            None => return warn!("setup_native_handler called multiple times."),
+        };
+
+        let _ = self.task_source.queue_with_canceller(
+            task!(setup_native_body_promise_handler: move || {
+                let promise = promise.root();
+
+                let promise_handler = Box::new(BodyPromiseHandler {
+                    bytes_sender,
+                    promise: promise.clone(),
+                });
+
+                let handler = PromiseNativeHandler::new(&global.root(), Some(promise_handler), None);
+                promise.append_native_handler(&handler);
+            }),
+            &self.canceller,
+        );
+    }
+}
+
+#[derive(JSTraceable, MallocSizeOf)]
+struct BodyPromiseHandler {
+    #[ignore_malloc_size_of = "Channels are hard"]
+    bytes_sender: IpcSender<Vec<u8>>,
+    #[ignore_malloc_size_of = "Rc"]
+    promise: Rc<Promise>,
+}
+
+impl Callback for BodyPromiseHandler {
+    fn callback(&self, _cx: *mut UnSafeJSContext, v: HandleValue) {
+        // 1: Send chunks over IPC.
+        // 2: If reader is not done, read another chunk from the stream.
+    }
+}
+
+/// The result of https://fetch.spec.whatwg.org/#concept-bodyinit-extract
+pub struct ExtractedBody {
+    pub stream: Rc<ReadableStream>,
+    pub source: BodySource,
+    pub total_bytes: usize,
+    pub content_type: Option<DOMString>,
+}
+
+impl ExtractedBody {
+    /// Essentially infra for the parallel steps of
+    /// <https://fetch.spec.whatwg.org/#concept-request-transmit-body>
+    pub fn into_request_body(self, global: &GlobalScope) -> (RequestBody, Rc<ReadableStream>) {
+        let ExtractedBody {
+            stream,
+            total_bytes,
+            content_type,
+            source,
+        } = self;
+
+        let (stream_connect_sender, stream_connect_receiver) = ipc::channel().unwrap();
+        let promise = TrustedPromise::new(stream.read_a_chunk());
+        let trusted_global = Trusted::new(global);
+
+        let task_source = global.networking_task_source();
+        let canceller = global.task_canceller(TaskSourceName::Networking);
+
+        let mut body_handler =
+            BodyConnectHandler::new(promise, trusted_global, task_source, canceller);
+
+        ROUTER.add_route(
+            stream_connect_receiver.to_opaque(),
+            Box::new(move |message| {
+                let bytes_sender = message.to().unwrap();
+                body_handler.setup_native_handler(bytes_sender);
+            }),
+        );
+
+        let request_body = RequestBody {
+            stream: stream_connect_sender,
+            source,
+            transmitted_bytes: 0,
+            total_bytes,
+        };
+
+        (request_body, stream)
+    }
+}
+
+/// <https://fetch.spec.whatwg.org/#concept-bodyinit-extract>
+pub trait Extractable {
+    fn extract(&self) -> ExtractedBody;
+}
+
+impl Extractable for BodyInit {
+    // https://fetch.spec.whatwg.org/#concept-bodyinit-extract
+    fn extract(&self) -> ExtractedBody {
+        match self {
+            BodyInit::String(ref s) => s.extract(),
+            BodyInit::URLSearchParams(ref usp) => usp.extract(),
+            BodyInit::Blob(ref b) => b.extract(),
+            BodyInit::FormData(ref formdata) => formdata.extract(),
+            BodyInit::ArrayBuffer(ref typedarray) => {
+                let bytes = typedarray.to_vec();
+                let total_bytes = bytes.len();
+                ExtractedBody {
+                    stream: ReadableStream::new_with_external_underlying_source(bytes),
+                    total_bytes,
+                    content_type: None,
+                    source: BodySource::BufferSource,
+                }
+            },
+            BodyInit::ArrayBufferView(ref typedarray) => {
+                let bytes = typedarray.to_vec();
+                let total_bytes = bytes.len();
+                ExtractedBody {
+                    stream: ReadableStream::new_with_external_underlying_source(bytes),
+                    total_bytes,
+                    content_type: None,
+                    source: BodySource::BufferSource,
+                }
+            },
+            BodyInit::ReadableStream(stream) => ExtractedBody {
+                stream: stream.clone(),
+                total_bytes: 0,
+                content_type: None,
+                source: BodySource::Null,
+            },
+        }
+    }
+}
+
+impl Extractable for Vec<u8> {
+    fn extract(&self) -> ExtractedBody {
+        // TODO: use a stream with a native underlying source.
+        let bytes = self.clone();
+        let total_bytes = self.len();
+        ExtractedBody {
+            stream: ReadableStream::new_with_external_underlying_source(bytes),
+            total_bytes,
+            content_type: None,
+            // A vec is used only in `submit_entity_body`.
+            source: BodySource::FormData,
+        }
+    }
+}
+
+impl Extractable for Blob {
+    fn extract(&self) -> ExtractedBody {
+        // TODO: use a stream with a native underlying source.
+        let content_type = if self.Type().as_ref().is_empty() {
+            None
+        } else {
+            Some(self.Type())
+        };
+        let bytes = self.get_bytes().unwrap_or(vec![]);
+        let total_bytes = bytes.len();
+        ExtractedBody {
+            stream: ReadableStream::new_with_external_underlying_source(bytes),
+            total_bytes,
+            content_type,
+            source: BodySource::Blob,
+        }
+    }
+}
+
+impl Extractable for DOMString {
+    fn extract(&self) -> ExtractedBody {
+        // TODO: use a stream with a native underlying source.
+        let bytes = self.as_bytes().to_owned();
+        let total_bytes = bytes.len();
+        let content_type = Some(DOMString::from("text/plain;charset=UTF-8"));
+        ExtractedBody {
+            stream: ReadableStream::new_with_external_underlying_source(bytes),
+            total_bytes,
+            content_type,
+            source: BodySource::USVString,
+        }
+    }
+}
+
+impl Extractable for FormData {
+    fn extract(&self) -> ExtractedBody {
+        // TODO: use a stream with a native underlying source.
+        let boundary = generate_boundary();
+        let bytes = encode_multipart_form_data(&mut self.datums(), boundary.clone(), UTF_8);
+        let total_bytes = bytes.len();
+        let content_type = Some(DOMString::from(format!(
+            "multipart/form-data;boundary={}",
+            boundary
+        )));
+        ExtractedBody {
+            stream: ReadableStream::new_with_external_underlying_source(bytes),
+            total_bytes,
+            content_type,
+            source: BodySource::FormData,
+        }
+    }
+}
+
+impl Extractable for URLSearchParams {
+    fn extract(&self) -> ExtractedBody {
+        // TODO: use a stream with a native underlying source.
+        let bytes = self.serialize_utf8().into_bytes();
+        let total_bytes = bytes.len();
+        let content_type = Some(DOMString::from(
+            "application/x-www-form-urlencoded;charset=UTF-8",
+        ));
+        ExtractedBody {
+            stream: ReadableStream::new_with_external_underlying_source(bytes),
+            total_bytes,
+            content_type,
+            source: BodySource::URLSearchParams,
+        }
+    }
+}
 
 #[derive(Clone, Copy, JSTraceable, MallocSizeOf)]
 pub enum BodyType {

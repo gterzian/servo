@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 use crate::body::{consume_body, consume_body_with_promise, BodyOperations, BodyType};
+use crate::body::{Extractable, ExtractedBody};
 use crate::dom::bindings::cell::{DomRefCell, Ref};
 use crate::dom::bindings::codegen::Bindings::HeadersBinding::{HeadersInit, HeadersMethods};
 use crate::dom::bindings::codegen::Bindings::ResponseBinding;
@@ -18,7 +19,6 @@ use crate::dom::globalscope::GlobalScope;
 use crate::dom::headers::{is_obs_text, is_vchar};
 use crate::dom::headers::{Guard, Headers};
 use crate::dom::promise::Promise;
-use crate::dom::xmlhttprequest::Extractable;
 use crate::script_runtime::StreamConsumer;
 use dom_struct::dom_struct;
 use http::header::HeaderMap as HyperHeaders;
@@ -130,8 +130,17 @@ impl Response {
             };
 
             // Step 7.3
-            let (extracted_body, content_type) = body.extract();
-            *r.body.borrow_mut() = NetTraitsResponseBody::Done(extracted_body);
+            let ExtractedBody {
+                stream,
+                total_bytes,
+                content_type,
+                source,
+            } = body.extract();
+
+            let body = stream
+                .clone_body()
+                .expect("Streaming response bodies not supported yet.");
+            *r.body.borrow_mut() = NetTraitsResponseBody::Done(body);
 
             // Step 7.4
             if let Some(content_type_contents) = content_type {

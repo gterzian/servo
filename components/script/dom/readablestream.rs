@@ -4,10 +4,12 @@
 
 use crate::dom::bindings::reflector::{DomObject, MutDomObject, Reflector};
 use crate::dom::bindings::utils::AsCCharPtrPtr;
+use crate::dom::promise::Promise;
 use crate::script_runtime::JSContext as SafeJSContext;
 use dom_struct::dom_struct;
 use js::jsapi::{
-    AddRawValueRoot, Heap, IsReadableStream, JSObject, RemoveRawValueRoot, UnwrapReadableStream,
+    AddRawValueRoot, Heap, IsReadableStream, JSObject, ReadableStreamGetReader,
+    ReadableStreamReaderMode, RemoveRawValueRoot, UnwrapReadableStream,
 };
 use js::jsval::{JSVal, ObjectValue};
 use js::rust::Runtime;
@@ -82,13 +84,19 @@ impl ReadableStream {
     /// TODO: use an actual Rust underlying source to provide data asynchronously,
     /// see `js::jsapi::ReadableStreamUnderlyingSource`.
     pub fn new_with_external_underlying_source(source: Vec<u8>) -> Rc<ReadableStream> {
-        let stream = ReadableStream {
+        Rc::new(ReadableStream {
             reflector_: Reflector::new(),
             permanent_js_root: Heap::default(),
             external_underlying_source: Some(source),
-        };
-        Rc::new(stream)
+        })
     }
 
-    pub fn read_a_chunk(&self) -> Rc<Promise> {}
+    /// Hack to make partial integration easier
+    pub fn clone_body(&self) -> Option<Vec<u8>> {
+        self.external_underlying_source.clone()
+    }
+
+    pub fn read_a_chunk(&self) -> Rc<Promise> {
+        Promise::new(&self.global())
+    }
 }

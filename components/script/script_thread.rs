@@ -17,6 +17,7 @@
 //! a page runs its course and the script thread returns to processing events in the main event
 //! loop.
 
+use crate::body::{Extractable, ExtractedBody};
 use crate::devtools;
 use crate::document_loader::DocumentLoader;
 use crate::dom::bindings::cell::DomRefCell;

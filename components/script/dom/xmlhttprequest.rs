@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+use crate::body::{Extractable, ExtractedBody};
 use crate::document_loader::DocumentLoader;
 use crate::dom::bindings::cell::DomRefCell;
 use crate::dom::bindings::codegen::Bindings::BlobBinding::BlobBinding::BlobMethods;
@@ -14,7 +15,7 @@ use crate::dom::bindings::codegen::UnionTypes::DocumentOrBodyInit;
 use crate::dom::bindings::conversions::ToJSValConvertible;
 use crate::dom::bindings::error::{Error, ErrorResult, Fallible};
 use crate::dom::bindings::inheritance::Castable;
-use crate::dom::bindings::refcounted::Trusted;
+use crate::dom::bindings::refcounted::{Trusted, TrustedPromise};
 use crate::dom::bindings::reflector::{reflect_dom_object, DomObject};
 use crate::dom::bindings::root::{Dom, DomRoot, MutNullableDom};
 use crate::dom::bindings::str::{is_token, ByteString, DOMString, USVString};
@@ -31,6 +32,7 @@ use crate::dom::node::Node;
 use crate::dom::performanceresourcetiming::InitiatorType;
 use crate::dom::progressevent::ProgressEvent;
 use crate::dom::promisenativehandler::{Callback, PromiseNativeHandler};
+use crate::dom::readablestream::ReadableStream;
 use crate::dom::servoparser::ServoParser;
 use crate::dom::urlsearchparams::URLSearchParams;
 use crate::dom::window::Window;
@@ -60,7 +62,9 @@ use js::jsval::{JSVal, NullValue, UndefinedValue};
 use js::rust::wrappers::JS_ParseJSON;
 use js::typedarray::{ArrayBuffer, CreateWith};
 use mime::{self, Mime, Name};
-use net_traits::request::{CredentialsMode, Destination, Referrer, RequestBuilder, RequestMode};
+use net_traits::request::{
+    BodySource, CredentialsMode, Destination, Referrer, RequestBuilder, RequestMode,
+};
 use net_traits::trim_http_whitespace;
 use net_traits::CoreResourceMsg::Fetch;
 use net_traits::{FetchChannels, FetchMetadata, FilteredMetadata};
@@ -76,6 +80,7 @@ use std::cmp;
 use std::default::Default;
 use std::ptr;
 use std::ptr::NonNull;
+use std::rc::Rc;
 use std::slice;
 use std::str::{self, FromStr};
 use std::sync::{Arc, Mutex};
@@ -568,7 +573,7 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
             _ => data,
         };
         // Step 4 (first half)
-        let extracted_or_serialized = match data {
+        let mut extracted_or_serialized = match data {
             Some(DocumentOrBodyInit::Document(ref doc)) => {
                 let data = Vec::from(serialize_document(&doc)?.as_ref());
                 let content_type = if doc.is_html_document() {
@@ -576,24 +581,47 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
                 } else {
                     "application/xml;charset=UTF-8"
                 };
-                Some((data, Some(DOMString::from(content_type))))
+                let total_bytes = data.len();
+                Some(ExtractedBody {
+                    stream: ReadableStream::new_with_external_underlying_source(data),
+                    total_bytes,
+                    content_type: Some(DOMString::from(content_type)),
+                    source: BodySource::Null,
+                })
             },
             Some(DocumentOrBodyInit::Blob(ref b)) => Some(b.extract()),
             Some(DocumentOrBodyInit::FormData(ref formdata)) => Some(formdata.extract()),
             Some(DocumentOrBodyInit::String(ref str)) => Some(str.extract()),
             Some(DocumentOrBodyInit::URLSearchParams(ref urlsp)) => Some(urlsp.extract()),
             Some(DocumentOrBodyInit::ArrayBuffer(ref typedarray)) => {
-                Some((typedarray.to_vec(), None))
+                let bytes = typedarray.to_vec();
+                let total_bytes = bytes.len();
+                Some(ExtractedBody {
+                    stream: ReadableStream::new_with_external_underlying_source(bytes),
+                    total_bytes,
+                    content_type: None,
+                    source: BodySource::BufferSource,
+                })
             },
             Some(DocumentOrBodyInit::ArrayBufferView(ref typedarray)) => {
-                Some((typedarray.to_vec(), None))
+                let bytes = typedarray.to_vec();
+                let total_bytes = bytes.len();
+                Some(ExtractedBody {
+                    stream: ReadableStream::new_with_external_underlying_source(bytes),
+                    total_bytes,
+                    content_type: None,
+                    source: BodySource::BufferSource,
+                })
             },
             Some(DocumentOrBodyInit::ReadableStream(_)) => None,
             None => None,
         };
 
-        self.request_body_len
-            .set(extracted_or_serialized.as_ref().map_or(0, |e| e.0.len()));
+        self.request_body_len.set(
+            extracted_or_serialized
+                .as_ref()
+                .map_or(0, |e| e.total_bytes),
+        );
 
         // todo preserved headers?
 
@@ -602,7 +630,8 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
         // Step 7
         self.upload_complete.set(match extracted_or_serialized {
             None => true,
-            Some(ref e) if e.0.is_empty() => true,
+            // TODO: handle empty stream.
+            // Some(ref e) if e.0.is_empty() => true,
             _ => false,
         });
         // Step 8
@@ -641,12 +670,17 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
             unreachable!()
         };
 
+        let content_type = match extracted_or_serialized.as_mut() {
+            Some(body) => body.content_type.take(),
+            None => None,
+        };
+
         let mut request = RequestBuilder::new(self.request_url.borrow().clone().unwrap())
             .method(self.request_method.borrow().clone())
             .headers((*self.request_headers.borrow()).clone())
             .unsafe_request(true)
             // XXXManishearth figure out how to avoid this clone
-            .body(extracted_or_serialized.as_ref().map(|e| e.0.clone()))
+            .body(extracted_or_serialized.map(|e| e.into_request_body(&self.global()).0))
             // XXXManishearth actually "subresource", but it doesn't exist
             // https://github.com/whatwg/xhr/issues/71
             .destination(Destination::None)
@@ -665,8 +699,8 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
             .pipeline_id(Some(self.global().pipeline_id()));
 
         // step 4 (second half)
-        match extracted_or_serialized {
-            Some((_, ref content_type)) => {
+        match content_type {
+            Some(content_type) => {
                 let encoding = match data {
                     Some(DocumentOrBodyInit::String(_)) | Some(DocumentOrBodyInit::Document(_)) =>
                     // XHR spec differs from http, and says UTF-8 should be in capitals,
@@ -679,13 +713,12 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
                 };
 
                 let mut content_type_set = false;
-                if let Some(ref ct) = *content_type {
-                    if !request.headers.contains_key(header::CONTENT_TYPE) {
-                        request
-                            .headers
-                            .insert(header::CONTENT_TYPE, HeaderValue::from_str(ct).unwrap());
-                        content_type_set = true;
-                    }
+                if !request.headers.contains_key(header::CONTENT_TYPE) {
+                    request.headers.insert(
+                        header::CONTENT_TYPE,
+                        HeaderValue::from_str(&content_type).unwrap(),
+                    );
+                    content_type_set = true;
                 }
 
                 if !content_type_set {
@@ -1563,118 +1596,11 @@ impl XHRTimeoutCallback {
     }
 }
 
-pub trait Extractable {
-    fn extract(&self) -> (Rc<ReadableStream>, Option<DOMString>);
-}
-
-impl Extractable for Blob {
-    fn extract(&self) -> (Rc<ReadableStream>, Option<DOMString>) {
-        // TODO: use a stream with a native underlying source.
-        let content_type = if self.Type().as_ref().is_empty() {
-            None
-        } else {
-            Some(self.Type())
-        };
-        let bytes = self.get_bytes().unwrap_or(vec![]);
-        (
-            ReadableStream::new_with_external_underlying_source(bytes),
-            content_type,
-        )
-    }
-}
-
-impl Extractable for DOMString {
-    fn extract(&self) -> (Rc<ReadableStream>, Option<DOMString>) {
-        // TODO: use a stream with a native underlying source.
-        let bytes = self.as_bytes().to_owned();
-        (
-            ReadableStream::new_with_external_underlying_source(bytes),
-            Some(DOMString::from("text/plain;charset=UTF-8")),
-        )
-    }
-}
-
-impl Extractable for FormData {
-    fn extract(&self) -> (Rc<ReadableStream>, Option<DOMString>) {
-        // TODO: use a stream with a native underlying source.
-        let boundary = generate_boundary();
-        let bytes = encode_multipart_form_data(&mut self.datums(), boundary.clone(), UTF_8);
-        (
-            ReadableStream::new_with_external_underlying_source(bytes),
-            Some(DOMString::from(format!(
-                "multipart/form-data;boundary={}",
-                boundary
-            ))),
-        )
-    }
-}
-
-impl Extractable for URLSearchParams {
-    fn extract(&self) -> (Rc<ReadableStream>, Option<DOMString>) {
-        // TODO: use a stream with a native underlying source.
-        let bytes = self.serialize_utf8().into_bytes();
-        (
-            ReadableStream::new_with_external_underlying_source(bytes),
-            Some(DOMString::from(
-                "application/x-www-form-urlencoded;charset=UTF-8",
-            )),
-        )
-    }
-}
-
 fn serialize_document(doc: &Document) -> Fallible<DOMString> {
     let mut writer = vec![];
     match serialize(&mut writer, &doc.upcast::<Node>(), SerializeOpts::default()) {
         Ok(_) => Ok(DOMString::from(String::from_utf8(writer).unwrap())),
         Err(_) => Err(Error::InvalidState),
-    }
-}
-
-#[derive(Clone)]
-struct BodyHandler {
-    body_sender: IpcSender<Vec<u8>>,
-    promise: Rc<Promise>,
-}
-
-impl BodyHandler {
-    pub fn new(body_sender: IpcSender<Vec<u8>>, promise: Rc<Promise>) -> Box<BodyHandler> {
-        Box::new(BodyHandler {
-            body_sender,
-            promise,
-        })
-    }
-
-    pub fn setup_native_handler(&self) {
-        let body_handler = Box::new(self.clone());
-
-        let handler = PromiseNativeHandler::new(&self.global(), Some(body_handler), None);
-
-        self.promise.append_native_handler(&handler);
-    }
-}
-
-impl Callback for BodyHandler {
-    fn callback(&self, _cx: *mut JSContext, v: HandleValue) {
-        // 1: Send chunks over IPC.
-        // 2: If reader is not done, read another chunk from the stream.
-    }
-}
-
-impl Extractable for BodyInit {
-    // https://fetch.spec.whatwg.org/#concept-bodyinit-extract
-    fn extract(&self) -> (Rc<ReadableStream>, Option<DOMString>) {
-        match *self {
-            BodyInit::String(ref s) => s.extract(),
-            BodyInit::URLSearchParams(ref usp) => usp.extract(),
-            BodyInit::Blob(ref b) => b.extract(),
-            BodyInit::FormData(ref formdata) => formdata.extract(),
-            BodyInit::ArrayBuffer(ref typedarray) | BodyInit::ArrayBufferView(ref typedarray) => {
-                let bytes = typedarray.to_vec();
-                let stream = ReadableStream::new_with_external_underlying_source(bytes);
-                (stream, None)
-            },
-            BodyInit::ReadableStream(stream) => (stream, None),
-        }
     }
 }
 
