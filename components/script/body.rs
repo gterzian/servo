@@ -111,7 +111,7 @@ impl Callback for BodyPromiseHandler {
 
 /// The result of https://fetch.spec.whatwg.org/#concept-bodyinit-extract
 pub struct ExtractedBody {
-    pub stream: Rc<ReadableStream>,
+    pub stream: DomRoot<ReadableStream>,
     pub source: BodySource,
     pub total_bytes: usize,
     pub content_type: Option<DOMString>,
@@ -120,7 +120,7 @@ pub struct ExtractedBody {
 impl ExtractedBody {
     /// Essentially infra for the parallel steps of
     /// <https://fetch.spec.whatwg.org/#concept-request-transmit-body>
-    pub fn into_request_body(self, global: &GlobalScope) -> (RequestBody, Rc<ReadableStream>) {
+    pub fn into_request_body(self, global: &GlobalScope) -> (RequestBody, DomRoot<ReadableStream>) {
         let ExtractedBody {
             stream,
             total_bytes,

@@ -944,7 +944,7 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
         templateBody = wrapObjectTemplate(templateBody, "None",
                                           isDefinitelyObject, type, failureCode)
 
-        declType = CGGeneric("Rc<ReadableStream>")
+        declType = CGGeneric("DomRoot<ReadableStream>")
 
         return handleOptional(templateBody, declType,
                               handleDefault("None"))
@@ -4418,7 +4418,7 @@ def getUnionTypeTemplateVars(type, descriptorProvider):
         typeName = "Heap<*mut JSObject>"
     elif type.isReadableStream():
         name = type.name
-        typeName = "Rc<ReadableStream>"
+        typeName = "DomRoot<ReadableStream>"
     elif is_typed_array(type):
         name = type.name
         typeName = "typedarray::Heap" + name

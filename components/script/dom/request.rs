@@ -54,7 +54,7 @@ pub struct Request {
     request: DomRefCell<NetTraitsRequest>,
     body_used: Cell<bool>,
     #[ignore_malloc_size_of = "Rc"]
-    js_body: DomRefCell<Option<Rc<ReadableStream>>>,
+    js_body: DomRefCell<Option<DomRoot<ReadableStream>>>,
     headers: MutNullableDom<Headers>,
     mime_type: DomRefCell<Vec<u8>>,
     #[ignore_malloc_size_of = "Rc"]

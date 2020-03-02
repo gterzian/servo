@@ -2,10 +2,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use crate::dom::bindings::reflector::{DomObject, MutDomObject, Reflector};
+use crate::dom::bindings::codegen::Bindings::ReadableStreamBinding;
+use crate::dom::bindings::reflector::{reflect_dom_object, DomObject, MutDomObject, Reflector};
+use crate::dom::bindings::root::DomRoot;
 use crate::dom::bindings::utils::set_dictionary_property;
 use crate::dom::bindings::utils::AsCCharPtrPtr;
+use crate::dom::globalscope::GlobalScope;
 use crate::dom::promise::Promise;
+use crate::realms::{AlreadyInRealm, InRealm};
 use crate::script_runtime::JSContext as SafeJSContext;
 use dom_struct::dom_struct;
 use js::jsapi::{
@@ -17,67 +21,49 @@ use js::jsval::{JSVal, ObjectValue};
 use js::rust::{IntoHandle, Runtime};
 use std::rc::Rc;
 
-/// Private helper to enable adding new methods to Rc<ReadableStream>.
-trait ReadableStreamHelper {
-    fn initialize(&self, cx: SafeJSContext);
-}
-
-impl ReadableStreamHelper for Rc<ReadableStream> {
-    #[allow(unsafe_code)]
-    fn initialize(&self, cx: SafeJSContext) {
-        let obj = self.reflector().get_jsobject();
-        unsafe {
-            self.permanent_js_root
-                .set(ObjectValue(UnwrapReadableStream(*obj)));
-            assert!(AddRawValueRoot(
-                *cx,
-                self.permanent_js_root.get_unsafe(),
-                b"ReadableStream::root\0".as_c_char_ptr()
-            ));
-        }
-    }
-}
-
-impl Drop for ReadableStream {
-    #[allow(unsafe_code)]
-    fn drop(&mut self) {
-        unsafe {
-            let object = self.permanent_js_root.get().to_object();
-            assert!(!object.is_null());
-            let cx = Runtime::get();
-            assert!(!cx.is_null());
-            RemoveRawValueRoot(cx, self.permanent_js_root.get_unsafe());
-        }
-    }
-}
-
 #[dom_struct]
 #[unrooted_must_root_lint::allow_unrooted_in_rc]
 pub struct ReadableStream {
     reflector_: Reflector,
     #[ignore_malloc_size_of = "SM handles JS values"]
-    permanent_js_root: Heap<JSVal>,
+    js_stream: Heap<*mut JSObject>,
     /// This should be an object implementing `js::jsapi::ReadableStreamUnderlyingSource`.
     external_underlying_source: Option<Vec<u8>>,
 }
 
 impl ReadableStream {
+    fn new_inherited(external_underlying_source: Option<Vec<u8>>) -> ReadableStream {
+        ReadableStream {
+            reflector_: Reflector::new(),
+            js_stream: Heap::default(),
+            external_underlying_source,
+        }
+    }
+
+    pub fn new(
+        global: &GlobalScope,
+        external_underlying_source: Option<Vec<u8>>,
+    ) -> DomRoot<ReadableStream> {
+        reflect_dom_object(
+            Box::new(ReadableStream::new_inherited(external_underlying_source)),
+            global,
+            ReadableStreamBinding::Wrap,
+        )
+    }
+
     #[allow(unsafe_code, unrooted_must_root)]
-    pub fn from_js(cx: SafeJSContext, obj: *mut JSObject) -> Result<Rc<ReadableStream>, ()> {
+    pub fn from_js(cx: SafeJSContext, obj: *mut JSObject) -> Result<DomRoot<ReadableStream>, ()> {
         unsafe {
             if !IsReadableStream(obj) {
                 return Err(());
             }
 
-            let stream = ReadableStream {
-                reflector_: Reflector::new(),
-                permanent_js_root: Heap::default(),
-                external_underlying_source: None,
-            };
-            let mut stream = Rc::new(stream);
+            let in_realm_proof = AlreadyInRealm::assert_for_cx(cx);
+            let global = GlobalScope::from_context(*cx, InRealm::Already(&in_realm_proof));
 
-            Rc::get_mut(&mut stream).unwrap().init_reflector(obj);
-            stream.initialize(cx);
+            let stream = ReadableStream::new(&global, None);
+            stream.js_stream.set(UnwrapReadableStream(obj));
+
             Ok(stream)
         }
     }
@@ -85,12 +71,9 @@ impl ReadableStream {
     /// Build a stream backed by a Rust underlying source.
     /// TODO: use an actual Rust underlying source to provide data asynchronously,
     /// see `js::jsapi::ReadableStreamUnderlyingSource`.
-    pub fn new_with_external_underlying_source(source: Vec<u8>) -> Rc<ReadableStream> {
-        Rc::new(ReadableStream {
-            reflector_: Reflector::new(),
-            permanent_js_root: Heap::default(),
-            external_underlying_source: Some(source),
-        })
+    pub fn new_with_external_underlying_source(source: Vec<u8>) -> DomRoot<ReadableStream> {
+        let global = GlobalScope::current().expect("No current global object.");
+        ReadableStream::new(&*global, Some(source))
     }
 
     /// Hack to make partial integration easier
@@ -103,7 +86,7 @@ impl ReadableStream {
         let cx = self.global().get_cx();
 
         unsafe {
-            rooted!(in(*cx) let stream = self.permanent_js_root.get().to_object());
+            rooted!(in(*cx) let stream = self.js_stream.get());
 
             rooted!(in(*cx) let reader = ReadableStreamGetReader(
                 *cx,
@@ -126,7 +109,7 @@ impl ReadableStream {
         let mut locked_or_disturbed = false;
 
         unsafe {
-            rooted!(in(*cx) let stream = self.permanent_js_root.get().to_object());
+            rooted!(in(*cx) let stream = self.js_stream.get());
             ReadableStreamIsLocked(*cx, stream.handle().into_handle(), &mut locked_or_disturbed);
             ReadableStreamIsDisturbed(*cx, stream.handle().into_handle(), &mut locked_or_disturbed);
         }
