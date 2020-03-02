@@ -15,10 +15,12 @@ use dom_struct::dom_struct;
 use js::jsapi::{
     AddRawValueRoot, Heap, IsReadableStream, JSObject, JS_NewObject,
     ReadableStreamDefaultReaderRead, ReadableStreamGetReader, ReadableStreamIsDisturbed,
-    ReadableStreamIsLocked, ReadableStreamReaderMode, RemoveRawValueRoot, UnwrapReadableStream,
+    ReadableStreamIsLocked, ReadableStreamReaderMode, ReadableStreamReaderReleaseLock,
+    RemoveRawValueRoot, UnwrapReadableStream,
 };
 use js::jsval::{JSVal, ObjectValue};
 use js::rust::{IntoHandle, Runtime};
+use std::cell::Cell;
 use std::rc::Rc;
 
 #[dom_struct]
@@ -27,6 +29,9 @@ pub struct ReadableStream {
     reflector_: Reflector,
     #[ignore_malloc_size_of = "SM handles JS values"]
     js_stream: Heap<*mut JSObject>,
+    #[ignore_malloc_size_of = "SM handles JS values"]
+    js_reader: Heap<*mut JSObject>,
+    has_reader: Cell<bool>,
     /// This should be an object implementing `js::jsapi::ReadableStreamUnderlyingSource`.
     external_underlying_source: Option<Vec<u8>>,
 }
@@ -36,6 +41,8 @@ impl ReadableStream {
         ReadableStream {
             reflector_: Reflector::new(),
             js_stream: Heap::default(),
+            js_reader: Heap::default(),
+            has_reader: Default::default(),
             external_underlying_source,
         }
     }
@@ -82,7 +89,13 @@ impl ReadableStream {
     }
 
     #[allow(unsafe_code)]
-    pub fn read_a_chunk(&self) -> Rc<Promise> {
+    /// Acquires a reader and locks the stream,
+    /// must be done before `read_a_chunk`.
+    pub fn start_reading(&self) {
+        if self.has_reader.get() {
+            panic!("ReadableStream::start_reading called on a locked stream.");
+        }
+
         let cx = self.global().get_cx();
 
         unsafe {
@@ -94,26 +107,48 @@ impl ReadableStream {
                 ReadableStreamReaderMode::Default,
             ));
 
+            // Note: the stream is locked to the reader.
+            self.js_reader.set(reader.get());
+        }
+
+        self.has_reader.set(true);
+    }
+
+    #[allow(unsafe_code)]
+    /// Read a chunk from the stream,
+    /// must be called after `start_reading`,
+    /// and before `stop_reading`.
+    pub fn read_a_chunk(&self) -> Rc<Promise> {
+        if !self.has_reader.get() {
+            panic!("ReadableStream::read_a_chunk called before start_reading.");
+        }
+
+        let cx = self.global().get_cx();
+
+        unsafe {
             rooted!(in(*cx) let promise_obj = ReadableStreamDefaultReaderRead(
                 *cx,
-                reader.handle().into_handle(),
+                self.js_reader.handle(),
             ));
-
             Promise::new_with_js_promise(promise_obj.handle(), cx)
         }
     }
 
     #[allow(unsafe_code)]
-    pub fn is_locked_or_disturbed(&self) -> bool {
-        let cx = self.global().get_cx();
-        let mut locked_or_disturbed = false;
-
-        unsafe {
-            rooted!(in(*cx) let stream = self.js_stream.get());
-            ReadableStreamIsLocked(*cx, stream.handle().into_handle(), &mut locked_or_disturbed);
-            ReadableStreamIsDisturbed(*cx, stream.handle().into_handle(), &mut locked_or_disturbed);
+    /// Releases the lock on the reader,
+    /// must be done after `start_reading`.
+    pub fn stop_reading(&self) {
+        if self.has_reader.get() {
+            panic!("ReadableStream::stop_reading called on a readerless stream.");
         }
 
-        locked_or_disturbed
+        self.has_reader.set(false);
+
+        let cx = self.global().get_cx();
+
+        unsafe {
+            ReadableStreamReaderReleaseLock(*cx, self.js_reader.handle());
+            let _ = self.js_reader.get();
+        }
     }
 }

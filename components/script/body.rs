@@ -80,6 +80,8 @@ impl BodyConnectHandler {
         let _ = self.task_source.queue_with_canceller(
             task!(setup_native_body_promise_handler: move || {
                 let rooted_stream = stream.root();
+                rooted_stream.start_reading();
+
                 let promise = rooted_stream.read_a_chunk();
 
                 let promise_handler = Box::new(BodyPromiseHandler {
@@ -87,7 +89,9 @@ impl BodyConnectHandler {
                     stream: rooted_stream,
                 });
 
-                let handler = PromiseNativeHandler::new(&global.root(), Some(promise_handler), None);
+                let rejection_handler = promise_handler.clone();
+
+                let handler = PromiseNativeHandler::new(&global.root(), Some(promise_handler), Some(rejection_handler));
                 promise.append_native_handler(&handler);
             }),
             &self.canceller,
@@ -95,7 +99,7 @@ impl BodyConnectHandler {
     }
 }
 
-#[derive(JSTraceable, MallocSizeOf)]
+#[derive(Clone, JSTraceable, MallocSizeOf)]
 struct BodyPromiseHandler {
     #[ignore_malloc_size_of = "Channels are hard"]
     bytes_sender: IpcSender<Vec<u8>>,
@@ -106,6 +110,9 @@ impl Callback for BodyPromiseHandler {
     fn callback(&self, _cx: *mut UnSafeJSContext, v: HandleValue) {
         // 1: Send chunks over IPC.
         // 2: If reader is not done, read another chunk from the stream.
+        // 3. If done, stop reading.
+
+        self.stream.stop_reading();
     }
 }
 
