@@ -18,7 +18,7 @@ use js::jsapi::{
     NewReadableExternalSourceStreamObject, ReadableStreamDefaultReaderRead,
     ReadableStreamGetReader, ReadableStreamIsDisturbed, ReadableStreamIsLocked,
     ReadableStreamReaderMode, ReadableStreamReaderReleaseLock, ReadableStreamUnderlyingSource,
-    RemoveRawValueRoot, UnwrapReadableStream,
+    ReadableStreamUpdateDataAvailableFromSource, RemoveRawValueRoot, UnwrapReadableStream,
 };
 use js::jsval::{JSVal, ObjectValue, UndefinedValue};
 use js::rust::{IntoHandle, Runtime};
@@ -199,7 +199,7 @@ unsafe extern "C" fn request_vec_data(
 
 impl ExternalUnderlyingSource for Vec<u8> {
     #[allow(unsafe_code)]
-    unsafe fn create_wrapper(&mut self) -> *mut ReadableStreamUnderlyingSource {
+    fn create_wrapper(&mut self) -> *mut ReadableStreamUnderlyingSource {
         let mut traps = ReadableStreamUnderlyingSourceTraps {
             requestData: Some(request_vec_data),
             writeIntoReadRequestBuffer: None,
@@ -208,7 +208,14 @@ impl ExternalUnderlyingSource for Vec<u8> {
             onErrored: None,
             finalize: None,
         };
-        CreateReadableStreamUnderlyingSource(&mut traps, self as *mut _ as *mut c_void)
+        unsafe { CreateReadableStreamUnderlyingSource(&mut traps, self as *mut _ as *mut c_void) }
+    }
+
+    #[allow(unsafe_code)]
+    fn pull(&mut self, cx: SafeJSContext, stream: HandleObject, desired_size: usize) {
+        unsafe {
+            ReadableStreamUpdateDataAvailableFromSource(*cx, stream, self.len() as u32);
+        }
     }
 
     fn clone_body(&self) -> Vec<u8> {
@@ -218,8 +225,7 @@ impl ExternalUnderlyingSource for Vec<u8> {
 
 /// Something from which a ExternalUnderlyingSource can
 pub trait ExternalUnderlyingSource {
-    #[allow(unsafe_code)]
-    unsafe fn create_wrapper(&mut self) -> *mut ReadableStreamUnderlyingSource;
+    fn create_wrapper(&mut self) -> *mut ReadableStreamUnderlyingSource;
 
     fn start(&mut self, cx: SafeJSContext, stream: HandleObject) {}
 
