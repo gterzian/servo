@@ -32,7 +32,7 @@ use crate::dom::node::Node;
 use crate::dom::performanceresourcetiming::InitiatorType;
 use crate::dom::progressevent::ProgressEvent;
 use crate::dom::promisenativehandler::{Callback, PromiseNativeHandler};
-use crate::dom::readablestream::ReadableStream;
+use crate::dom::readablestream::{ExternalUnderlyingSource, ReadableStream};
 use crate::dom::servoparser::ServoParser;
 use crate::dom::urlsearchparams::URLSearchParams;
 use crate::dom::window::Window;
@@ -575,7 +575,7 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
         // Step 4 (first half)
         let mut extracted_or_serialized = match data {
             Some(DocumentOrBodyInit::Document(ref doc)) => {
-                let data = Vec::from(serialize_document(&doc)?.as_ref());
+                let mut data = Box::new(Vec::from(serialize_document(&doc)?.as_ref()));
                 let content_type = if doc.is_html_document() {
                     "text/html;charset=UTF-8"
                 } else {
@@ -594,7 +594,7 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
             Some(DocumentOrBodyInit::String(ref str)) => Some(str.extract()),
             Some(DocumentOrBodyInit::URLSearchParams(ref urlsp)) => Some(urlsp.extract()),
             Some(DocumentOrBodyInit::ArrayBuffer(ref typedarray)) => {
-                let bytes = typedarray.to_vec();
+                let bytes = Box::new(typedarray.to_vec());
                 let total_bytes = bytes.len();
                 Some(ExtractedBody {
                     stream: ReadableStream::new_with_external_underlying_source(bytes),
@@ -604,7 +604,7 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
                 })
             },
             Some(DocumentOrBodyInit::ArrayBufferView(ref typedarray)) => {
-                let bytes = typedarray.to_vec();
+                let bytes = Box::new(typedarray.to_vec());
                 let total_bytes = bytes.len();
                 Some(ExtractedBody {
                     stream: ReadableStream::new_with_external_underlying_source(bytes),

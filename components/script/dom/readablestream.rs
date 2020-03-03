@@ -17,8 +17,8 @@ use js::jsapi::{
     AddRawValueRoot, HandleObject, Heap, IsReadableStream, JSContext, JSObject, JS_NewObject,
     NewReadableExternalSourceStreamObject, ReadableStreamDefaultReaderRead,
     ReadableStreamGetReader, ReadableStreamIsDisturbed, ReadableStreamIsLocked,
-    ReadableStreamReaderMode, ReadableStreamReaderReleaseLock, RemoveRawValueRoot,
-    UnwrapReadableStream,
+    ReadableStreamReaderMode, ReadableStreamReaderReleaseLock, ReadableStreamUnderlyingSource,
+    RemoveRawValueRoot, UnwrapReadableStream,
 };
 use js::jsval::{JSVal, ObjectValue, UndefinedValue};
 use js::rust::{IntoHandle, Runtime};
@@ -36,12 +36,13 @@ pub struct ReadableStream {
     #[ignore_malloc_size_of = "SM handles JS values"]
     js_reader: Heap<*mut JSObject>,
     has_reader: Cell<bool>,
-    external_underlying_source: Option<ExternalUnderlyingSource>,
+    #[ignore_malloc_size_of = "Traits are hard"]
+    external_underlying_source: Option<Box<dyn ExternalUnderlyingSource>>,
 }
 
 impl ReadableStream {
     fn new_inherited(
-        external_underlying_source: Option<ExternalUnderlyingSource>,
+        external_underlying_source: Option<Box<dyn ExternalUnderlyingSource>>,
     ) -> ReadableStream {
         ReadableStream {
             reflector_: Reflector::new(),
@@ -54,7 +55,7 @@ impl ReadableStream {
 
     pub fn new(
         global: &GlobalScope,
-        external_underlying_source: Option<ExternalUnderlyingSource>,
+        external_underlying_source: Option<Box<dyn ExternalUnderlyingSource>>,
     ) -> DomRoot<ReadableStream> {
         reflect_dom_object(
             Box::new(ReadableStream::new_inherited(external_underlying_source)),
@@ -81,7 +82,7 @@ impl ReadableStream {
     fn from_js_with_source(
         cx: SafeJSContext,
         obj: *mut JSObject,
-        source: Option<ExternalUnderlyingSource>,
+        source: Option<Box<dyn ExternalUnderlyingSource>>,
     ) -> DomRoot<ReadableStream> {
         unsafe {
             let in_realm_proof = AlreadyInRealm::assert_for_cx(cx);
@@ -96,29 +97,17 @@ impl ReadableStream {
 
     /// Build a stream backed by a Rust underlying source.
     #[allow(unsafe_code)]
-    pub fn new_with_external_underlying_source(data: Vec<u8>) -> DomRoot<ReadableStream> {
-        let mut traps = ReadableStreamUnderlyingSourceTraps {
-            requestData: Some(request_data),
-            writeIntoReadRequestBuffer: None,
-            cancel: None,
-            onClosed: None,
-            onErrored: None,
-            finalize: None,
-        };
-        let mut source = ExternalUnderlyingSource::new_with_data(data);
+    pub fn new_with_external_underlying_source(
+        mut source: Box<dyn ExternalUnderlyingSource>,
+    ) -> DomRoot<ReadableStream> {
         unsafe {
-            let source_wrapper = CreateReadableStreamUnderlyingSource(
-                &mut traps,
-                &mut source as *mut _ as *mut c_void,
-            );
-
             let global = GlobalScope::current().expect("No current global object.");
             let cx = global.get_cx();
 
             rooted!(in(*cx) let proto = UndefinedValue());
             rooted!(in(*cx) let proto_obj = proto.to_object());
             rooted!(in(*cx)
-                let js_stream = NewReadableExternalSourceStreamObject(*cx, source_wrapper, proto_obj.handle().into_handle())
+                let js_stream = NewReadableExternalSourceStreamObject(*cx, source.create_wrapper(), proto_obj.handle().into_handle())
             );
 
             ReadableStream::from_js_with_source(cx, js_stream.get(), Some(source))
@@ -198,34 +187,44 @@ impl ReadableStream {
 }
 
 #[allow(unsafe_code)]
-unsafe extern "C" fn request_data(
+unsafe extern "C" fn request_vec_data(
     source: *const c_void,
     cx: *mut JSContext,
     stream: HandleObject,
     desired_size: usize,
 ) {
-    let source = &mut *(source as *mut ExternalUnderlyingSource);
-    source.request_data(SafeJSContext::from_ptr(cx), stream, desired_size);
+    let source = &mut *(source as *mut Vec<u8>);
+    source.pull(SafeJSContext::from_ptr(cx), stream, desired_size);
 }
 
-#[derive(MallocSizeOf)]
-pub struct ExternalUnderlyingSource {
-    /// TODO: integrate with a streaming source.
-    data: Vec<u8>,
-}
-
-impl ExternalUnderlyingSource {
+impl ExternalUnderlyingSource for Vec<u8> {
     #[allow(unsafe_code)]
-    pub fn new_with_data(data: Vec<u8>) -> ExternalUnderlyingSource {
-        ExternalUnderlyingSource { data }
+    unsafe fn create_wrapper(&mut self) -> *mut ReadableStreamUnderlyingSource {
+        let mut traps = ReadableStreamUnderlyingSourceTraps {
+            requestData: Some(request_vec_data),
+            writeIntoReadRequestBuffer: None,
+            cancel: None,
+            onClosed: None,
+            onErrored: None,
+            finalize: None,
+        };
+        CreateReadableStreamUnderlyingSource(&mut traps, self as *mut _ as *mut c_void)
     }
+
+    fn clone_body(&self) -> Vec<u8> {
+        self.clone()
+    }
+}
+
+/// Something from which a ExternalUnderlyingSource can
+pub trait ExternalUnderlyingSource {
+    #[allow(unsafe_code)]
+    unsafe fn create_wrapper(&mut self) -> *mut ReadableStreamUnderlyingSource;
+
+    fn start(&mut self, cx: SafeJSContext, stream: HandleObject) {}
+
+    fn pull(&mut self, cx: SafeJSContext, stream: HandleObject, desired_size: usize) {}
 
     /// Hack to make partial integration easier
-    pub fn clone_body(&self) -> Vec<u8> {
-        self.data.clone()
-    }
-
-    pub fn request_data(&mut self, cx: SafeJSContext, stream: HandleObject, desired_size: usize) {
-        // TODO: start reading data asynchronously.
-    }
+    fn clone_body(&self) -> Vec<u8>;
 }
