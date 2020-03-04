@@ -178,20 +178,24 @@ impl Extractable for BodyInit {
             BodyInit::Blob(ref b) => b.extract(),
             BodyInit::FormData(ref formdata) => formdata.extract(),
             BodyInit::ArrayBuffer(ref typedarray) => {
-                let bytes = Box::new(typedarray.to_vec());
+                let bytes = typedarray.to_vec();
                 let total_bytes = bytes.len();
                 ExtractedBody {
-                    stream: ReadableStream::new_with_external_underlying_source(bytes),
+                    stream: ReadableStream::new_with_external_underlying_source(
+                        ExternalUnderlyingSource::Memory(bytes),
+                    ),
                     total_bytes,
                     content_type: None,
                     source: BodySource::BufferSource,
                 }
             },
             BodyInit::ArrayBufferView(ref typedarray) => {
-                let bytes = Box::new(typedarray.to_vec());
+                let bytes = typedarray.to_vec();
                 let total_bytes = bytes.len();
                 ExtractedBody {
-                    stream: ReadableStream::new_with_external_underlying_source(bytes),
+                    stream: ReadableStream::new_with_external_underlying_source(
+                        ExternalUnderlyingSource::Memory(bytes),
+                    ),
                     total_bytes,
                     content_type: None,
                     source: BodySource::BufferSource,
@@ -210,10 +214,12 @@ impl Extractable for BodyInit {
 impl Extractable for Vec<u8> {
     fn extract(&self) -> ExtractedBody {
         // TODO: use a stream with a native underlying source.
-        let bytes = Box::new(self.clone());
+        let bytes = self.clone();
         let total_bytes = self.len();
         ExtractedBody {
-            stream: ReadableStream::new_with_external_underlying_source(bytes),
+            stream: ReadableStream::new_with_external_underlying_source(
+                ExternalUnderlyingSource::Memory(bytes),
+            ),
             total_bytes,
             content_type: None,
             // A vec is used only in `submit_entity_body`.
@@ -230,10 +236,12 @@ impl Extractable for Blob {
         } else {
             Some(self.Type())
         };
-        let bytes = Box::new(self.get_bytes().unwrap_or(vec![]));
+        let bytes = self.get_bytes().unwrap_or(vec![]);
         let total_bytes = bytes.len();
         ExtractedBody {
-            stream: ReadableStream::new_with_external_underlying_source(bytes),
+            stream: ReadableStream::new_with_external_underlying_source(
+                ExternalUnderlyingSource::Memory(bytes),
+            ),
             total_bytes,
             content_type,
             source: BodySource::Blob,
@@ -244,11 +252,13 @@ impl Extractable for Blob {
 impl Extractable for DOMString {
     fn extract(&self) -> ExtractedBody {
         // TODO: use a stream with a native underlying source.
-        let bytes = Box::new(self.as_bytes().to_owned());
+        let bytes = self.as_bytes().to_owned();
         let total_bytes = bytes.len();
         let content_type = Some(DOMString::from("text/plain;charset=UTF-8"));
         ExtractedBody {
-            stream: ReadableStream::new_with_external_underlying_source(bytes),
+            stream: ReadableStream::new_with_external_underlying_source(
+                ExternalUnderlyingSource::Memory(bytes),
+            ),
             total_bytes,
             content_type,
             source: BodySource::USVString,
@@ -260,18 +270,16 @@ impl Extractable for FormData {
     fn extract(&self) -> ExtractedBody {
         // TODO: use a stream with a native underlying source.
         let boundary = generate_boundary();
-        let bytes = Box::new(encode_multipart_form_data(
-            &mut self.datums(),
-            boundary.clone(),
-            UTF_8,
-        ));
+        let bytes = encode_multipart_form_data(&mut self.datums(), boundary.clone(), UTF_8);
         let total_bytes = bytes.len();
         let content_type = Some(DOMString::from(format!(
             "multipart/form-data;boundary={}",
             boundary
         )));
         ExtractedBody {
-            stream: ReadableStream::new_with_external_underlying_source(bytes),
+            stream: ReadableStream::new_with_external_underlying_source(
+                ExternalUnderlyingSource::Memory(bytes),
+            ),
             total_bytes,
             content_type,
             source: BodySource::FormData,
@@ -282,13 +290,15 @@ impl Extractable for FormData {
 impl Extractable for URLSearchParams {
     fn extract(&self) -> ExtractedBody {
         // TODO: use a stream with a native underlying source.
-        let bytes = Box::new(self.serialize_utf8().into_bytes());
+        let bytes = self.serialize_utf8().into_bytes();
         let total_bytes = bytes.len();
         let content_type = Some(DOMString::from(
             "application/x-www-form-urlencoded;charset=UTF-8",
         ));
         ExtractedBody {
-            stream: ReadableStream::new_with_external_underlying_source(bytes),
+            stream: ReadableStream::new_with_external_underlying_source(
+                ExternalUnderlyingSource::Memory(bytes),
+            ),
             total_bytes,
             content_type,
             source: BodySource::URLSearchParams,

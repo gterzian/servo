@@ -41,7 +41,7 @@ use crate::dom::gpubuffer::GPUBufferState;
 use crate::dom::htmlimageelement::SourceSet;
 use crate::dom::htmlmediaelement::{HTMLMediaElementFetchContext, MediaFrameRenderer};
 use crate::dom::identityhub::Identities;
-use crate::dom::readablestream::ExternalUnderlyingSource;
+use crate::dom::readablestream::ExternalUnderlyingSourceWrapper;
 use crate::script_runtime::StreamConsumer;
 use crate::task::TaskBox;
 use app_units::Au;
@@ -171,7 +171,7 @@ pub unsafe trait JSTraceable {
 
 unsafe_no_jsmanaged_fields!(Box<dyn TaskBox>, Box<dyn EventLoopWaker>);
 
-unsafe_no_jsmanaged_fields!(ExternalUnderlyingSource);
+unsafe_no_jsmanaged_fields!(ExternalUnderlyingSourceWrapper);
 
 unsafe_no_jsmanaged_fields!(MessagePortImpl);
 unsafe_no_jsmanaged_fields!(MessagePortId);

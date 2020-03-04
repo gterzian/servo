@@ -575,7 +575,7 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
         // Step 4 (first half)
         let mut extracted_or_serialized = match data {
             Some(DocumentOrBodyInit::Document(ref doc)) => {
-                let mut data = Box::new(Vec::from(serialize_document(&doc)?.as_ref()));
+                let mut data = Vec::from(serialize_document(&doc)?.as_ref());
                 let content_type = if doc.is_html_document() {
                     "text/html;charset=UTF-8"
                 } else {
@@ -583,7 +583,9 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
                 };
                 let total_bytes = data.len();
                 Some(ExtractedBody {
-                    stream: ReadableStream::new_with_external_underlying_source(data),
+                    stream: ReadableStream::new_with_external_underlying_source(
+                        ExternalUnderlyingSource::Memory(data),
+                    ),
                     total_bytes,
                     content_type: Some(DOMString::from(content_type)),
                     source: BodySource::Null,
@@ -594,20 +596,24 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
             Some(DocumentOrBodyInit::String(ref str)) => Some(str.extract()),
             Some(DocumentOrBodyInit::URLSearchParams(ref urlsp)) => Some(urlsp.extract()),
             Some(DocumentOrBodyInit::ArrayBuffer(ref typedarray)) => {
-                let bytes = Box::new(typedarray.to_vec());
+                let bytes = typedarray.to_vec();
                 let total_bytes = bytes.len();
                 Some(ExtractedBody {
-                    stream: ReadableStream::new_with_external_underlying_source(bytes),
+                    stream: ReadableStream::new_with_external_underlying_source(
+                        ExternalUnderlyingSource::Memory(bytes),
+                    ),
                     total_bytes,
                     content_type: None,
                     source: BodySource::BufferSource,
                 })
             },
             Some(DocumentOrBodyInit::ArrayBufferView(ref typedarray)) => {
-                let bytes = Box::new(typedarray.to_vec());
+                let bytes = typedarray.to_vec();
                 let total_bytes = bytes.len();
                 Some(ExtractedBody {
-                    stream: ReadableStream::new_with_external_underlying_source(bytes),
+                    stream: ReadableStream::new_with_external_underlying_source(
+                        ExternalUnderlyingSource::Memory(bytes),
+                    ),
                     total_bytes,
                     content_type: None,
                     source: BodySource::BufferSource,
