@@ -185,6 +185,44 @@ impl ReadableStream {
             let _ = self.js_reader.get();
         }
     }
+
+    #[allow(unsafe_code)]
+    pub fn is_locked(&self) -> bool {
+        // If we natively took a reader, we're locked.
+        if self.has_reader.get() {
+            return true;
+        }
+
+        // Otherwise, still double-check that script didn't lock the stream.
+        let cx = self.global().get_cx();
+        let mut locked_or_disturbed = false;
+
+        unsafe {
+            rooted!(in(*cx) let stream = self.js_stream.get());
+            ReadableStreamIsLocked(*cx, stream.handle().into_handle(), &mut locked_or_disturbed);
+        }
+
+        locked_or_disturbed
+    }
+
+    #[allow(unsafe_code)]
+    pub fn is_disturbed(&self) -> bool {
+        // If we natively took a reader, we're disturbed(Note: or is that only if reading has started?).
+        if self.has_reader.get() {
+            return true;
+        }
+
+        // Otherwise, still double-check that script didn't disturb the stream.
+        let cx = self.global().get_cx();
+        let mut locked_or_disturbed = false;
+
+        unsafe {
+            rooted!(in(*cx) let stream = self.js_stream.get());
+            ReadableStreamIsDisturbed(*cx, stream.handle().into_handle(), &mut locked_or_disturbed);
+        }
+
+        locked_or_disturbed
+    }
 }
 
 #[allow(unsafe_code)]

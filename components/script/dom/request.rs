@@ -655,7 +655,14 @@ impl RequestMethods for Request {
 
     // https://fetch.spec.whatwg.org/#dom-body-bodyused
     fn BodyUsed(&self) -> bool {
-        self.body_used.get()
+        if self.body_used.get() {
+            return true;
+        }
+
+        let js_body = self.js_body.borrow_mut().take();
+        js_body
+            .and_then(|stream| Some(stream.is_disturbed()))
+            .unwrap_or(false)
     }
 
     // https://fetch.spec.whatwg.org/#dom-request-clone
@@ -710,7 +717,10 @@ impl BodyOperations for Request {
     }
 
     fn is_locked(&self) -> bool {
-        self.locked()
+        let js_body = self.js_body.borrow_mut().take();
+        js_body
+            .and_then(|stream| Some(stream.is_locked()))
+            .unwrap_or(false)
     }
 
     fn take_body(&self) -> Option<Vec<u8>> {
