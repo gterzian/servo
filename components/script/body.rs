@@ -70,7 +70,8 @@ impl BodyConnectHandler {
         }
     }
 
-    pub fn start_reading_from_stream(&mut self, bytes_sender: IpcSender<Vec<u8>>) {
+    /// <https://fetch.spec.whatwg.org/#concept-request-transmit-body>
+    pub fn start_transmitting_body(&mut self, bytes_sender: IpcSender<Vec<u8>>) {
         let global = self.global.clone();
         let stream = match self.stream.take() {
             Some(stream) => stream,
@@ -125,8 +126,17 @@ pub struct ExtractedBody {
 }
 
 impl ExtractedBody {
-    /// Essentially infra for the parallel steps of
-    /// <https://fetch.spec.whatwg.org/#concept-request-transmit-body>
+    /// Build a request body from the extracted body,
+    /// to be sent over IPC to net to use with `concept-request-transmit-body`,
+    /// see https://fetch.spec.whatwg.org/#concept-request-transmit-body.
+    ///
+    /// Also returning the corresponding readable stream,
+    /// to be stored on the request in script,
+    /// and potentially used as part of `consume_body`,
+    /// see https://fetch.spec.whatwg.org/#concept-body-consume-body
+    ///
+    /// Transmitting a body over fetch, and consuming it in script,
+    /// are mutually exclusive operations, since each will lock the stream to a reader.
     pub fn into_request_body(self, global: &GlobalScope) -> (RequestBody, DomRoot<ReadableStream>) {
         let ExtractedBody {
             stream,
@@ -149,7 +159,7 @@ impl ExtractedBody {
             stream_connect_receiver.to_opaque(),
             Box::new(move |message| {
                 let bytes_sender = message.to().unwrap();
-                body_handler.start_reading_from_stream(bytes_sender);
+                body_handler.start_transmitting_body(bytes_sender);
             }),
         );
 
