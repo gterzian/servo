@@ -19,6 +19,7 @@ use crate::dom::globalscope::GlobalScope;
 use crate::dom::headers::{is_obs_text, is_vchar};
 use crate::dom::headers::{Guard, Headers};
 use crate::dom::promise::Promise;
+use crate::dom::readablestream::{ExternalUnderlyingSource, ReadableStream};
 use crate::script_runtime::StreamConsumer;
 use dom_struct::dom_struct;
 use http::header::HeaderMap as HyperHeaders;
@@ -245,10 +246,14 @@ impl BodyOperations for Response {
         self.locked()
     }
 
-    fn take_body(&self) -> Option<Vec<u8>> {
+    fn get_stream(&self) -> Option<DomRoot<ReadableStream>> {
         let body = mem::replace(&mut *self.body.borrow_mut(), NetTraitsResponseBody::Empty);
         match body {
-            NetTraitsResponseBody::Done(bytes) => Some(bytes),
+            NetTraitsResponseBody::Done(bytes) => {
+                Some(ReadableStream::new_with_external_underlying_source(
+                    ExternalUnderlyingSource::Memory(bytes),
+                ))
+            },
             body => {
                 mem::replace(&mut *self.body.borrow_mut(), body);
                 None
@@ -256,8 +261,8 @@ impl BodyOperations for Response {
         }
     }
 
-    fn get_mime_type(&self) -> Ref<Vec<u8>> {
-        self.mime_type.borrow()
+    fn get_mime_type(&self) -> Vec<u8> {
+        self.mime_type.borrow().clone()
     }
 }
 
@@ -469,7 +474,7 @@ impl Response {
     pub fn finish(&self, body: Vec<u8>) {
         *self.body.borrow_mut() = NetTraitsResponseBody::Done(body);
         if let Some((p, body_type)) = self.body_promise.borrow_mut().take() {
-            consume_body_with_promise(self, body_type, &p);
+            consume_body_with_promise(self, body_type, p.clone());
         }
         if let Some(stream_consumer) = self.stream_consumer.borrow_mut().take() {
             stream_consumer.stream_end();

@@ -2,16 +2,21 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+use crate::dom::bindings::cell::DomRefCell;
 use crate::dom::bindings::cell::Ref;
 use crate::dom::bindings::codegen::Bindings::BlobBinding::BlobBinding::BlobMethods;
 use crate::dom::bindings::codegen::Bindings::FormDataBinding::FormDataMethods;
 use crate::dom::bindings::codegen::Bindings::XMLHttpRequestBinding::BodyInit;
+use crate::dom::bindings::conversions::{
+    ConversionBehavior, ConversionResult, FromJSValConvertible,
+};
 use crate::dom::bindings::error::{Error, Fallible};
 use crate::dom::bindings::refcounted::{Trusted, TrustedPromise};
 use crate::dom::bindings::reflector::DomObject;
 use crate::dom::bindings::root::DomRoot;
 use crate::dom::bindings::str::{is_token, ByteString, DOMString, USVString};
 use crate::dom::bindings::trace::RootedTraceableBox;
+use crate::dom::bindings::utils::get_dictionary_property;
 use crate::dom::blob::{normalize_type_string, Blob};
 use crate::dom::formdata::FormData;
 use crate::dom::globalscope::GlobalScope;
@@ -33,6 +38,7 @@ use js::jsapi::Heap;
 use js::jsapi::JSContext as UnSafeJSContext;
 use js::jsapi::JSObject;
 use js::jsapi::JS_ClearPendingException;
+use js::jsapi::JS_GetUint8ArrayData;
 use js::jsapi::Value as JSValue;
 use js::jsval::JSVal;
 use js::jsval::UndefinedValue;
@@ -43,6 +49,7 @@ use js::typedarray::{ArrayBuffer, CreateWith};
 use mime::{self, Mime};
 use net_traits::request::{BodySource, RequestBody};
 use script_traits::serializable::BlobImpl;
+use std::cell::RefCell;
 use std::ptr;
 use std::rc::Rc;
 use std::str;
@@ -337,6 +344,139 @@ pub enum FetchedData {
     JSException(RootedTraceableBox<Heap<JSVal>>),
 }
 
+#[derive(Clone, JSTraceable, MallocSizeOf)]
+/// The promise handler used to consume the body,
+/// <https://fetch.spec.whatwg.org/#concept-body-consume-body>
+struct ConsumeBodyPromiseHandler {
+    #[ignore_malloc_size_of = "Rc are hard"]
+    result_promise: Rc<Promise>,
+    stream: DomRoot<ReadableStream>,
+    body_type: DomRefCell<Option<BodyType>>,
+    mime_type: DomRefCell<Option<Vec<u8>>>,
+    bytes: DomRefCell<Option<Vec<u8>>>,
+}
+
+impl ConsumeBodyPromiseHandler {
+    /// Resolve the promise with the bytes received,
+    /// first running the data through the package algorithm.
+    fn resolve_result_promise(&self, cx: JSContext) {
+        let body_type = self.body_type.borrow_mut().take().unwrap();
+        let mime_type = self.mime_type.borrow_mut().take().unwrap();
+        let body = self.bytes.borrow_mut().take().unwrap();
+
+        let pkg_data_results = run_package_data_algorithm(cx, body, body_type, mime_type);
+
+        match pkg_data_results {
+            Ok(results) => {
+                match results {
+                    FetchedData::Text(s) => self.result_promise.resolve_native(&USVString(s)),
+                    FetchedData::Json(j) => self.result_promise.resolve_native(&j),
+                    FetchedData::BlobData(b) => self.result_promise.resolve_native(&b),
+                    FetchedData::FormData(f) => self.result_promise.resolve_native(&f),
+                    FetchedData::ArrayBuffer(a) => self.result_promise.resolve_native(&a),
+                    FetchedData::JSException(e) => self.result_promise.reject_native(&e.handle()),
+                };
+            },
+            Err(err) => self.result_promise.reject_error(err),
+        }
+    }
+}
+
+#[derive(Clone, JSTraceable, MallocSizeOf)]
+struct ConsumeBodyPromiseRejectionHandler {
+    #[ignore_malloc_size_of = "Rc are hard"]
+    result_promise: Rc<Promise>,
+}
+
+impl Callback for ConsumeBodyPromiseRejectionHandler {
+    #[allow(unsafe_code)]
+    fn callback(&self, cx: *mut UnSafeJSContext, v: HandleValue) {
+        let cx = unsafe { JSContext::from_ptr(cx) };
+        self.result_promise.reject(cx, v);
+    }
+}
+
+impl Callback for ConsumeBodyPromiseHandler {
+    #[allow(unsafe_code)]
+    /// Step 4 of <https://fetch.spec.whatwg.org/#concept-body-consume-body>
+    fn callback(&self, cx: *mut UnSafeJSContext, v: HandleValue) {
+        unsafe {
+            rooted!(in(cx) let mut done = UndefinedValue());
+            rooted!(in(cx) let mut bytes = UndefinedValue());
+            rooted!(in(cx) let object = v.to_object());
+
+            let has_done =
+                get_dictionary_property(cx, object.handle(), "done", done.handle_mut()).is_ok();
+            let has_value =
+                get_dictionary_property(cx, object.handle(), "value", bytes.handle_mut()).is_ok();
+
+            if !has_done {
+                return self
+                    .result_promise
+                    .reject_error(Error::Type("".to_string()));
+            }
+
+            let is_done = match bool::from_jsval(cx, done.handle(), ()) {
+                Ok(ConversionResult::Success(val)) => val,
+                _ => panic!("Couldn't convert jsval to boolean"),
+            };
+
+            if is_done {
+                self.stream.stop_reading();
+                self.resolve_result_promise(JSContext::from_ptr(cx));
+            } else {
+                if !has_value {
+                    return self
+                        .result_promise
+                        .reject_error(Error::Type("".to_string()));
+                }
+
+                let chunk = match Vec::<u8>::from_jsval(
+                    cx,
+                    bytes.handle(),
+                    ConversionBehavior::EnforceRange,
+                ) {
+                    Ok(ConversionResult::Success(val)) => val,
+                    _ => panic!("Couldn't convert jsval to Vec<u8>"),
+                };
+
+                let mut bytes = self
+                    .bytes
+                    .borrow_mut()
+                    .take()
+                    .expect("No bytes for ConsumeBodyPromiseHandler.");
+                bytes.extend_from_slice(&*chunk);
+
+                // Read another chunk.
+                let read_promise = self.stream.read_a_chunk();
+
+                let promise_handler = Box::new(ConsumeBodyPromiseHandler {
+                    result_promise: self.result_promise.clone(),
+                    stream: self.stream.clone(),
+                    body_type: DomRefCell::new(self.body_type.borrow_mut().take()),
+                    mime_type: DomRefCell::new(self.mime_type.borrow_mut().take()),
+                    bytes: DomRefCell::new(Some(bytes)),
+                });
+
+                let rejection_handler = Box::new(ConsumeBodyPromiseRejectionHandler {
+                    result_promise: self.result_promise.clone(),
+                });
+
+                let safe_cx = JSContext::from_ptr(cx);
+                let in_realm_proof = AlreadyInRealm::assert_for_cx(safe_cx.clone());
+                let global = GlobalScope::from_context(*safe_cx, InRealm::Already(&in_realm_proof));
+
+                let handler = PromiseNativeHandler::new(
+                    &global,
+                    Some(promise_handler),
+                    Some(rejection_handler),
+                );
+                read_promise.append_native_handler(&handler);
+            }
+        }
+    }
+}
+
 // https://fetch.spec.whatwg.org/#concept-body-consume-body
 #[allow(unrooted_must_root)]
 pub fn consume_body<T: BodyOperations + DomObject>(object: &T, body_type: BodyType) -> Rc<Promise> {
@@ -354,10 +494,7 @@ pub fn consume_body<T: BodyOperations + DomObject>(object: &T, body_type: BodyTy
 
     object.set_body_promise(&promise, body_type);
 
-    // Steps 2-4
-    // TODO: Body does not yet have a stream.
-
-    consume_body_with_promise(object, body_type, &promise);
+    consume_body_with_promise(object, body_type, promise.clone());
 
     promise
 }
@@ -367,43 +504,48 @@ pub fn consume_body<T: BodyOperations + DomObject>(object: &T, body_type: BodyTy
 pub fn consume_body_with_promise<T: BodyOperations + DomObject>(
     object: &T,
     body_type: BodyType,
-    promise: &Promise,
+    promise: Rc<Promise>,
 ) {
-    // Step 5
-    let body = match object.take_body() {
+    let stream = match object.get_stream() {
         Some(body) => body,
         None => return,
     };
 
-    let pkg_data_results =
-        run_package_data_algorithm(object, body, body_type, object.get_mime_type());
+    stream.start_reading();
 
-    match pkg_data_results {
-        Ok(results) => {
-            match results {
-                FetchedData::Text(s) => promise.resolve_native(&USVString(s)),
-                FetchedData::Json(j) => promise.resolve_native(&j),
-                FetchedData::BlobData(b) => promise.resolve_native(&b),
-                FetchedData::FormData(f) => promise.resolve_native(&f),
-                FetchedData::ArrayBuffer(a) => promise.resolve_native(&a),
-                FetchedData::JSException(e) => promise.reject_native(&e.handle()),
-            };
-        },
-        Err(err) => promise.reject_error(err),
-    }
+    let read_promise = stream.read_a_chunk();
+
+    let promise_handler = Box::new(ConsumeBodyPromiseHandler {
+        result_promise: promise.clone(),
+        stream,
+        body_type: DomRefCell::new(Some(body_type)),
+        mime_type: DomRefCell::new(Some(object.get_mime_type())),
+        bytes: DomRefCell::new(Some(vec![])),
+    });
+
+    let rejection_handler = Box::new(ConsumeBodyPromiseRejectionHandler {
+        result_promise: promise,
+    });
+
+    let handler = PromiseNativeHandler::new(
+        &object.global(),
+        Some(promise_handler),
+        Some(rejection_handler),
+    );
+    read_promise.append_native_handler(&handler);
 }
 
 // https://fetch.spec.whatwg.org/#concept-body-package-data
 #[allow(unsafe_code)]
-fn run_package_data_algorithm<T: BodyOperations + DomObject>(
-    object: &T,
+fn run_package_data_algorithm(
+    cx: JSContext,
     bytes: Vec<u8>,
     body_type: BodyType,
-    mime_type: Ref<Vec<u8>>,
+    mime_type: Vec<u8>,
 ) -> Fallible<FetchedData> {
-    let global = object.global();
-    let cx = global.get_cx();
     let mime = &*mime_type;
+    let in_realm_proof = AlreadyInRealm::assert_for_cx(cx.clone());
+    let global = unsafe { GlobalScope::from_context(*cx, InRealm::Already(&in_realm_proof)) };
     match body_type {
         BodyType::Text => run_text_data_algorithm(bytes),
         BodyType::Json => run_json_data_algorithm(cx, bytes),
@@ -511,7 +653,7 @@ pub trait BodyOperations {
     fn set_body_promise(&self, p: &Rc<Promise>, body_type: BodyType);
     /// Returns `Some(_)` if the body is complete, `None` if there is more to
     /// come.
-    fn take_body(&self) -> Option<Vec<u8>>;
+    fn get_stream(&self) -> Option<DomRoot<ReadableStream>>;
     fn is_locked(&self) -> bool;
-    fn get_mime_type(&self) -> Ref<Vec<u8>>;
+    fn get_mime_type(&self) -> Vec<u8>;
 }

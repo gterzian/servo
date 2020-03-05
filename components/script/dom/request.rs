@@ -24,7 +24,7 @@ use crate::dom::bindings::trace::RootedTraceableBox;
 use crate::dom::globalscope::GlobalScope;
 use crate::dom::headers::{Guard, Headers};
 use crate::dom::promise::Promise;
-use crate::dom::readablestream::ReadableStream;
+use crate::dom::readablestream::{ExternalUnderlyingSource, ReadableStream};
 use crate::task_source::TaskSourceName;
 use dom_struct::dom_struct;
 use http::header::{HeaderName, HeaderValue};
@@ -723,17 +723,13 @@ impl BodyOperations for Request {
             .unwrap_or(false)
     }
 
-    fn take_body(&self) -> Option<Vec<u8>> {
+    fn get_stream(&self) -> Option<DomRoot<ReadableStream>> {
         let js_body = self.js_body.borrow_mut().take();
-        Some(
-            js_body
-                .and_then(|stream| stream.clone_body())
-                .unwrap_or(vec![]),
-        )
+        js_body.and_then(|stream| Some(DomRoot::from_ref(&*stream)))
     }
 
-    fn get_mime_type(&self) -> Ref<Vec<u8>> {
-        self.mime_type.borrow()
+    fn get_mime_type(&self) -> Vec<u8> {
+        self.mime_type.borrow().clone()
     }
 }
 
