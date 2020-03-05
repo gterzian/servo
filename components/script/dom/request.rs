@@ -454,7 +454,7 @@ impl Request {
                 }
             }
 
-            let (net_body, js_body) = extracted_body.into_request_body(global);
+            let (net_body, js_body) = extracted_body.into_net_request_body(global);
             *r.js_body.borrow_mut() = Some(js_body);
             input_body = Some(net_body);
         }

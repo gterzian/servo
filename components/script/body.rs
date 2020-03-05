@@ -48,21 +48,21 @@ use std::rc::Rc;
 use std::str;
 use url::form_urlencoded;
 
-struct BodyConnectHandler {
+struct TransmitBodyConnectHandler {
     stream: Option<Trusted<ReadableStream>>,
     global: Trusted<GlobalScope>,
     task_source: NetworkingTaskSource,
     canceller: TaskCanceller,
 }
 
-impl BodyConnectHandler {
+impl TransmitBodyConnectHandler {
     pub fn new(
         stream: Trusted<ReadableStream>,
         global: Trusted<GlobalScope>,
         task_source: NetworkingTaskSource,
         canceller: TaskCanceller,
-    ) -> BodyConnectHandler {
-        BodyConnectHandler {
+    ) -> TransmitBodyConnectHandler {
+        TransmitBodyConnectHandler {
             stream: Some(stream),
             global,
             task_source,
@@ -85,7 +85,7 @@ impl BodyConnectHandler {
 
                 let promise = rooted_stream.read_a_chunk();
 
-                let promise_handler = Box::new(BodyPromiseHandler {
+                let promise_handler = Box::new(TransmitBodyPromiseHandler {
                     bytes_sender,
                     stream: rooted_stream,
                 });
@@ -101,13 +101,13 @@ impl BodyConnectHandler {
 }
 
 #[derive(Clone, JSTraceable, MallocSizeOf)]
-struct BodyPromiseHandler {
+struct TransmitBodyPromiseHandler {
     #[ignore_malloc_size_of = "Channels are hard"]
     bytes_sender: IpcSender<Vec<u8>>,
     stream: DomRoot<ReadableStream>,
 }
 
-impl Callback for BodyPromiseHandler {
+impl Callback for TransmitBodyPromiseHandler {
     fn callback(&self, _cx: *mut UnSafeJSContext, v: HandleValue) {
         // 1: Send chunks over IPC.
         // 2: If reader is not done, read another chunk from the stream.
@@ -137,7 +137,10 @@ impl ExtractedBody {
     ///
     /// Transmitting a body over fetch, and consuming it in script,
     /// are mutually exclusive operations, since each will lock the stream to a reader.
-    pub fn into_request_body(self, global: &GlobalScope) -> (RequestBody, DomRoot<ReadableStream>) {
+    pub fn into_net_request_body(
+        self,
+        global: &GlobalScope,
+    ) -> (RequestBody, DomRoot<ReadableStream>) {
         let ExtractedBody {
             stream,
             total_bytes,
@@ -153,7 +156,7 @@ impl ExtractedBody {
         let canceller = global.task_canceller(TaskSourceName::Networking);
 
         let mut body_handler =
-            BodyConnectHandler::new(trusted_stream, trusted_global, task_source, canceller);
+            TransmitBodyConnectHandler::new(trusted_stream, trusted_global, task_source, canceller);
 
         ROUTER.add_route(
             stream_connect_receiver.to_opaque(),

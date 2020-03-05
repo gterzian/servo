@@ -791,7 +791,7 @@ impl HTMLFormElement {
             },
         };
 
-        let request_body = bytes.extract().into_request_body(&self.global()).0;
+        let request_body = bytes.extract().into_net_request_body(&self.global()).0;
         load_data.data = Some(request_body);
 
         self.plan_to_navigate(load_data, target);
