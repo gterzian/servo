@@ -16,6 +16,7 @@ use devtools_traits::{
     ChromeToDevtoolsControlMsg, DevtoolsControlMsg, HttpRequest as DevtoolsHttpRequest,
 };
 use devtools_traits::{HttpResponse as DevtoolsHttpResponse, NetworkEvent};
+use futures::future::IntoFuture;
 use headers::authorization::Basic;
 use headers::{AccessControlAllowCredentials, AccessControlAllowHeaders, HeaderMapExt};
 use headers::{
@@ -29,16 +30,16 @@ use http::header::{self, HeaderName, HeaderValue};
 use http::{HeaderMap, Request as HyperRequest};
 use hyper::{Body, Client, Method, Response as HyperResponse, StatusCode};
 use hyper_serde::Serde;
-use ipc_channel::ipc;
+use ipc_channel::ipc::{self, IpcSender};
 use ipc_channel::router::ROUTER;
 use msg::constellation_msg::{HistoryStateId, PipelineId};
 use net_traits::quality::{quality_to_value, Quality, QualityItem};
 use net_traits::request::Origin::Origin as SpecificOrigin;
 use net_traits::request::{is_cors_safelisted_method, is_cors_safelisted_request_header};
-use net_traits::request::{CacheMode, CredentialsMode, Destination, Origin};
 use net_traits::request::{
-    RedirectMode, Referrer, Request, RequestBody, RequestBuilder, RequestMode,
+    BodyChunkRequest, RedirectMode, Referrer, Request, RequestBody, RequestBuilder, RequestMode,
 };
+use net_traits::request::{CacheMode, CredentialsMode, Destination, Origin};
 use net_traits::request::{ResponseTainting, ServiceWorkersMode};
 use net_traits::response::{HttpsState, Response, ResponseBody, ResponseType};
 use net_traits::{CookieSource, FetchMetadata, NetworkError, ReferrerPolicy};
@@ -55,9 +56,9 @@ use std::str::FromStr;
 use std::sync::{Condvar, Mutex, RwLock};
 use std::time::{Duration, SystemTime};
 use time::{self, Tm};
-use tokio::prelude::{future, Future, Stream};
+use tokio::prelude::{future, Future, Sink, Stream};
 use tokio::runtime::Runtime;
-use tokio::sync::mpsc::unbounded_channel;
+use tokio::sync::mpsc::channel;
 
 lazy_static! {
     pub static ref HANDLE: Mutex<Runtime> = { Mutex::new(Runtime::new().unwrap()) };
@@ -363,7 +364,8 @@ fn obtain_response(
     url: &ServoUrl,
     method: &Method,
     request_headers: &HeaderMap,
-    body: &Option<RequestBody>,
+    body: Option<IpcSender<BodyChunkRequest>>,
+    request_len: usize,
     load_data_method: &Method,
     pipeline_id: &Option<PipelineId>,
     iters: u32,
@@ -387,20 +389,36 @@ fn obtain_response(
     let is_redirected_request = iters != 1;
 
     let request_body = match body {
-        &Some(ref d) if !is_redirected_request => {
-            headers.typed_insert(ContentLength(d.len() as u64));
+        Some(chunk_requester) if !is_redirected_request => {
+            headers.typed_insert(ContentLength(request_len as u64));
             let (body_chan, body_port) = ipc::channel().unwrap();
-            d.connect(body_chan);
 
-            let (mut sender, receiver) = unbounded_channel();
+            let (sender, receiver) = channel(0);
+
+            let _ = chunk_requester.send(BodyChunkRequest::Connect(body_chan.clone()));
+
+            // https://fetch.spec.whatwg.org/#concept-request-transmit-body
+            // Request the first chunk.
+            let _ = chunk_requester.send(BodyChunkRequest::Chunk);
 
             ROUTER.add_route(
                 body_port.to_opaque(),
                 Box::new(move |message| {
                     let bytes: Vec<u8> = message.to().unwrap();
-                    if sender.try_send(bytes).is_err() {
-                        warn!("Failed to forward bytes from script stream to net body.");
-                    }
+                    let chunk_requester = chunk_requester.clone();
+                    let sender = sender.clone();
+
+                    // Transmit a chunk over the network.
+                    HANDLE.lock().unwrap().spawn(
+                        sender
+                            .send(bytes)
+                            .map(move |_| {
+                                // Request the next chunk.
+                                let _ = chunk_requester.send(BodyChunkRequest::Chunk);
+                                ()
+                            })
+                            .map_err(|_| ()),
+                    );
                 }),
             );
 
@@ -410,7 +428,7 @@ fn obtain_response(
             if *load_data_method != Method::GET && *load_data_method != Method::HEAD {
                 headers.typed_insert(ContentLength(0))
             }
-            let (_sender, mut receiver) = unbounded_channel();
+            let (_sender, mut receiver) = channel(0);
 
             receiver.close();
 
@@ -1379,7 +1397,7 @@ impl Drop for ResponseEndTimer {
 
 /// [HTTP network fetch](https://fetch.spec.whatwg.org/#http-network-fetch)
 fn http_network_fetch(
-    request: &Request,
+    request: &mut Request,
     credentials_flag: bool,
     done_chan: &mut DoneChannel,
     context: &FetchContext,
@@ -1422,7 +1440,12 @@ fn http_network_fetch(
         &url,
         &request.method,
         &request.headers,
-        &request.body,
+        request.body.as_mut().and_then(|body| body.take_stream()),
+        request
+            .body
+            .as_ref()
+            .and_then(|body| Some(body.len()))
+            .unwrap_or(0),
         &request.method,
         &request.pipeline_id,
         request.redirect_count + 1,

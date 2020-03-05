@@ -7,7 +7,7 @@ use crate::ResourceTimingType;
 use content_security_policy::{self as csp, CspList};
 use http::HeaderMap;
 use hyper::Method;
-use ipc_channel::ipc::IpcSender;
+use ipc_channel::ipc::{IpcReceiver, IpcSender};
 use mime::Mime;
 use msg::constellation_msg::PipelineId;
 use servo_url::{ImmutableOrigin, ServoUrl};
@@ -126,28 +126,32 @@ pub enum BodySource {
     USVString,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub enum BodyChunkRequest {
+    Connect(IpcSender<Vec<u8>>),
+    Chunk,
+}
+
 /// <https://fetch.spec.whatwg.org/#bodies>
 #[derive(Clone, Debug, Deserialize, MallocSizeOf, Serialize)]
 pub struct RequestBody {
     #[ignore_malloc_size_of = "Channels are hard"]
-    pub stream: IpcSender<IpcSender<Vec<u8>>>,
+    pub stream: Option<IpcSender<BodyChunkRequest>>,
     pub source: BodySource,
     pub transmitted_bytes: u64,
     pub total_bytes: usize,
 }
 
 impl RequestBody {
+    pub fn take_stream(&mut self) -> Option<IpcSender<BodyChunkRequest>> {
+        self.stream.take()
+    }
+
     pub fn source_is_null(&self) -> bool {
         if let BodySource::Null = self.source {
             return true;
         }
         false
-    }
-
-    pub fn connect(&self, sender: IpcSender<Vec<u8>>) {
-        self.stream
-            .send(sender)
-            .expect("Failed to connect to request body stream.");
     }
 
     pub fn len(&self) -> usize {

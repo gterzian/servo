@@ -44,10 +44,10 @@ use js::jsval::JSVal;
 use js::jsval::UndefinedValue;
 use js::rust::wrappers::JS_GetPendingException;
 use js::rust::wrappers::JS_ParseJSON;
-use js::rust::HandleValue;
+use js::rust::{HandleObject, HandleValue};
 use js::typedarray::{ArrayBuffer, CreateWith};
 use mime::{self, Mime};
-use net_traits::request::{BodySource, RequestBody};
+use net_traits::request::{BodyChunkRequest, BodySource, RequestBody};
 use script_traits::serializable::BlobImpl;
 use std::cell::RefCell;
 use std::ptr;
@@ -56,10 +56,11 @@ use std::str;
 use url::form_urlencoded;
 
 struct TransmitBodyConnectHandler {
-    stream: Option<Trusted<ReadableStream>>,
+    stream: Trusted<ReadableStream>,
     global: Trusted<GlobalScope>,
     task_source: NetworkingTaskSource,
     canceller: TaskCanceller,
+    pub bytes_sender: Option<IpcSender<Vec<u8>>>,
 }
 
 impl TransmitBodyConnectHandler {
@@ -70,20 +71,22 @@ impl TransmitBodyConnectHandler {
         canceller: TaskCanceller,
     ) -> TransmitBodyConnectHandler {
         TransmitBodyConnectHandler {
-            stream: Some(stream),
+            stream: stream,
             global,
             task_source,
             canceller,
+            bytes_sender: None,
         }
     }
 
     /// <https://fetch.spec.whatwg.org/#concept-request-transmit-body>
-    pub fn start_transmitting_body(&mut self, bytes_sender: IpcSender<Vec<u8>>) {
+    pub fn transmit_body_chunk(&mut self) {
         let global = self.global.clone();
-        let stream = match self.stream.take() {
-            Some(stream) => stream,
-            None => return warn!("start_reading_from_stream called multiple times."),
-        };
+        let stream = self.stream.clone();
+        let bytes_sender = self
+            .bytes_sender
+            .clone()
+            .expect("No bytes sender to transmit chunk.");
 
         let _ = self.task_source.queue_with_canceller(
             task!(setup_native_body_promise_handler: move || {
@@ -94,10 +97,10 @@ impl TransmitBodyConnectHandler {
 
                 let promise_handler = Box::new(TransmitBodyPromiseHandler {
                     bytes_sender,
-                    stream: rooted_stream,
+                    stream: rooted_stream.clone(),
                 });
 
-                let rejection_handler = promise_handler.clone();
+                let rejection_handler = Box::new(TransmitBodyPromiseRejectionHandler {stream: rooted_stream});
 
                 let handler = PromiseNativeHandler::new(&global.root(), Some(promise_handler), Some(rejection_handler));
                 promise.append_native_handler(&handler);
@@ -115,12 +118,44 @@ struct TransmitBodyPromiseHandler {
 }
 
 impl Callback for TransmitBodyPromiseHandler {
-    fn callback(&self, _cx: *mut UnSafeJSContext, v: HandleValue) {
-        // 1: Send chunks over IPC.
-        // 2: If reader is not done, read another chunk from the stream.
-        // 3. If done, stop reading.
+    #[allow(unsafe_code)]
+    fn callback(&self, cx: *mut UnSafeJSContext, v: HandleValue) {
+        let cx = unsafe { JSContext::from_ptr(cx) };
+        let is_done = match get_read_promise_done(cx.clone(), &v) {
+            Ok(is_done) => is_done,
+            Err(_) => {
+                // TODO: terminate fetch.
+                return self.stream.stop_reading();
+            },
+        };
 
-        self.stream.stop_reading();
+        if is_done {
+            // TODO: queue a fetch task on request to process request end-of-body.
+            return self.stream.stop_reading();
+        }
+
+        let chunk = match get_read_promise_bytes(cx.clone(), &v) {
+            Ok(chunk) => chunk,
+            Err(_) => {
+                // TODO: terminate fetch.
+                return self.stream.stop_reading();
+            },
+        };
+
+        // Send the chunk to the body transmitter in net::http_loader::obtain_response.
+        let _ = self.bytes_sender.send(chunk);
+    }
+}
+
+#[derive(Clone, JSTraceable, MallocSizeOf)]
+struct TransmitBodyPromiseRejectionHandler {
+    stream: DomRoot<ReadableStream>,
+}
+
+impl Callback for TransmitBodyPromiseRejectionHandler {
+    fn callback(&self, cx: *mut UnSafeJSContext, v: HandleValue) {
+        // TODO: terminate fetch.
+        return self.stream.stop_reading();
     }
 }
 
@@ -155,7 +190,8 @@ impl ExtractedBody {
             source,
         } = self;
 
-        let (stream_connect_sender, stream_connect_receiver) = ipc::channel().unwrap();
+        let (chunk_request_sender, chunk_request_receiver) = ipc::channel().unwrap();
+
         let trusted_stream = Trusted::new(&*stream);
         let trusted_global = Trusted::new(global);
 
@@ -166,15 +202,20 @@ impl ExtractedBody {
             TransmitBodyConnectHandler::new(trusted_stream, trusted_global, task_source, canceller);
 
         ROUTER.add_route(
-            stream_connect_receiver.to_opaque(),
+            chunk_request_receiver.to_opaque(),
             Box::new(move |message| {
-                let bytes_sender = message.to().unwrap();
-                body_handler.start_transmitting_body(bytes_sender);
+                let request = message.to().unwrap();
+                match request {
+                    BodyChunkRequest::Connect(sender) => {
+                        body_handler.bytes_sender = Some(sender);
+                    },
+                    BodyChunkRequest::Chunk => body_handler.transmit_body_chunk(),
+                }
             }),
         );
 
         let request_body = RequestBody {
-            stream: stream_connect_sender,
+            stream: Some(chunk_request_sender),
             source,
             transmitted_bytes: 0,
             total_bytes,
@@ -396,83 +437,103 @@ impl Callback for ConsumeBodyPromiseRejectionHandler {
     }
 }
 
+#[allow(unsafe_code)]
+fn get_read_promise_done(cx: JSContext, v: &HandleValue) -> Result<bool, Error> {
+    unsafe {
+        rooted!(in(*cx) let object = v.to_object());
+        rooted!(in(*cx) let mut done = UndefinedValue());
+        let has_done =
+            get_dictionary_property(*cx, object.handle(), "done", done.handle_mut()).is_ok();
+
+        if !has_done {
+            return Err(Error::Type("".to_string()));
+        }
+
+        let is_done = match bool::from_jsval(*cx, done.handle(), ()) {
+            Ok(ConversionResult::Success(val)) => val,
+            _ => panic!("Couldn't convert jsval to boolean"),
+        };
+
+        Ok(is_done)
+    }
+}
+
+#[allow(unsafe_code)]
+fn get_read_promise_bytes(cx: JSContext, v: &HandleValue) -> Result<Vec<u8>, Error> {
+    unsafe {
+        rooted!(in(*cx) let object = v.to_object());
+        rooted!(in(*cx) let mut bytes = UndefinedValue());
+        let has_value =
+            get_dictionary_property(*cx, object.handle(), "value", bytes.handle_mut()).is_ok();
+
+        if !has_value {
+            return Err(Error::Type("".to_string()));
+        }
+
+        let chunk =
+            match Vec::<u8>::from_jsval(*cx, bytes.handle(), ConversionBehavior::EnforceRange) {
+                Ok(ConversionResult::Success(val)) => val,
+                _ => panic!("Couldn't convert jsval to Vec<u8>"),
+            };
+        Ok(chunk)
+    }
+}
+
 impl Callback for ConsumeBodyPromiseHandler {
     #[allow(unsafe_code)]
     /// Step 4 of <https://fetch.spec.whatwg.org/#concept-body-consume-body>
     fn callback(&self, cx: *mut UnSafeJSContext, v: HandleValue) {
-        unsafe {
-            rooted!(in(cx) let mut done = UndefinedValue());
-            rooted!(in(cx) let mut bytes = UndefinedValue());
-            rooted!(in(cx) let object = v.to_object());
+        let cx = unsafe { JSContext::from_ptr(cx) };
+        let is_done = match get_read_promise_done(cx.clone(), &v) {
+            Ok(is_done) => is_done,
+            Err(err) => {
+                self.stream.stop_reading();
+                return self.result_promise.reject_error(err);
+            },
+        };
 
-            let has_done =
-                get_dictionary_property(cx, object.handle(), "done", done.handle_mut()).is_ok();
-            let has_value =
-                get_dictionary_property(cx, object.handle(), "value", bytes.handle_mut()).is_ok();
-
-            if !has_done {
-                return self
-                    .result_promise
-                    .reject_error(Error::Type("".to_string()));
-            }
-
-            let is_done = match bool::from_jsval(cx, done.handle(), ()) {
-                Ok(ConversionResult::Success(val)) => val,
-                _ => panic!("Couldn't convert jsval to boolean"),
+        if is_done {
+            self.resolve_result_promise(cx.clone());
+        } else {
+            let chunk = match get_read_promise_bytes(cx.clone(), &v) {
+                Ok(chunk) => chunk,
+                Err(err) => {
+                    self.stream.stop_reading();
+                    return self.result_promise.reject_error(err);
+                },
             };
 
-            if is_done {
-                self.stream.stop_reading();
-                self.resolve_result_promise(JSContext::from_ptr(cx));
-            } else {
-                if !has_value {
-                    return self
-                        .result_promise
-                        .reject_error(Error::Type("".to_string()));
-                }
+            let mut bytes = self
+                .bytes
+                .borrow_mut()
+                .take()
+                .expect("No bytes for ConsumeBodyPromiseHandler.");
 
-                let chunk = match Vec::<u8>::from_jsval(
-                    cx,
-                    bytes.handle(),
-                    ConversionBehavior::EnforceRange,
-                ) {
-                    Ok(ConversionResult::Success(val)) => val,
-                    _ => panic!("Couldn't convert jsval to Vec<u8>"),
-                };
+            bytes.extend_from_slice(&*chunk);
 
-                let mut bytes = self
-                    .bytes
-                    .borrow_mut()
-                    .take()
-                    .expect("No bytes for ConsumeBodyPromiseHandler.");
-                bytes.extend_from_slice(&*chunk);
+            // Read another chunk.
+            let read_promise = self.stream.read_a_chunk();
 
-                // Read another chunk.
-                let read_promise = self.stream.read_a_chunk();
+            let promise_handler = Box::new(ConsumeBodyPromiseHandler {
+                result_promise: self.result_promise.clone(),
+                stream: self.stream.clone(),
+                body_type: DomRefCell::new(self.body_type.borrow_mut().take()),
+                mime_type: DomRefCell::new(self.mime_type.borrow_mut().take()),
+                bytes: DomRefCell::new(Some(bytes)),
+            });
 
-                let promise_handler = Box::new(ConsumeBodyPromiseHandler {
-                    result_promise: self.result_promise.clone(),
-                    stream: self.stream.clone(),
-                    body_type: DomRefCell::new(self.body_type.borrow_mut().take()),
-                    mime_type: DomRefCell::new(self.mime_type.borrow_mut().take()),
-                    bytes: DomRefCell::new(Some(bytes)),
-                });
+            let rejection_handler = Box::new(ConsumeBodyPromiseRejectionHandler {
+                result_promise: self.result_promise.clone(),
+            });
 
-                let rejection_handler = Box::new(ConsumeBodyPromiseRejectionHandler {
-                    result_promise: self.result_promise.clone(),
-                });
+            let global = unsafe {
+                let in_realm_proof = AlreadyInRealm::assert_for_cx(cx.clone());
+                GlobalScope::from_context(*cx, InRealm::Already(&in_realm_proof))
+            };
 
-                let safe_cx = JSContext::from_ptr(cx);
-                let in_realm_proof = AlreadyInRealm::assert_for_cx(safe_cx.clone());
-                let global = GlobalScope::from_context(*safe_cx, InRealm::Already(&in_realm_proof));
-
-                let handler = PromiseNativeHandler::new(
-                    &global,
-                    Some(promise_handler),
-                    Some(rejection_handler),
-                );
-                read_promise.append_native_handler(&handler);
-            }
+            let handler =
+                PromiseNativeHandler::new(&global, Some(promise_handler), Some(rejection_handler));
+            read_promise.append_native_handler(&handler);
         }
     }
 }
