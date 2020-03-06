@@ -111,7 +111,11 @@ impl ReadableStream {
             rooted!(in(*cx) let proto = UndefinedValue());
             rooted!(in(*cx) let proto_obj = proto.to_object());
             rooted!(in(*cx)
-                let js_stream = NewReadableExternalSourceStreamObject(*cx, source.create_js_wrapper(), proto_obj.handle().into_handle())
+                let js_stream = NewReadableExternalSourceStreamObject(
+                    *cx,
+                    source.create_js_wrapper(),
+                    proto_obj.handle().into_handle(),
+                )
             );
 
             ReadableStream::from_js_with_source(cx, js_stream.get(), Some(source))
