@@ -1014,10 +1014,10 @@ impl TestBindingMethods for TestBinding {
         }
         impl Callback for SimpleHandler {
             #[allow(unsafe_code)]
-            fn callback(&self, cx: *mut JSContext, v: HandleValue) {
+            fn callback(&self, cx: SafeJSContext, v: HandleValue) {
                 let global = unsafe {
-                    let in_realm_proof = AlreadyInRealm::assert_for_cx(SafeJSContext::from_ptr(cx));
-                    GlobalScope::from_context(cx, InRealm::Already(&in_realm_proof))
+                    let in_realm_proof = AlreadyInRealm::assert_for_cx(cx);
+                    GlobalScope::from_context(*cx, InRealm::Already(&in_realm_proof))
                 };
                 let _ = self.handler.Call_(&*global, v, ExceptionHandling::Report);
             }

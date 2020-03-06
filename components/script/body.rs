@@ -119,9 +119,7 @@ struct TransmitBodyPromiseHandler {
 }
 
 impl Callback for TransmitBodyPromiseHandler {
-    #[allow(unsafe_code)]
-    fn callback(&self, cx: *mut UnSafeJSContext, v: HandleValue) {
-        let cx = unsafe { JSContext::from_ptr(cx) };
+    fn callback(&self, cx: JSContext, v: HandleValue) {
         let is_done = match get_read_promise_done(cx.clone(), &v) {
             Ok(is_done) => is_done,
             Err(_) => {
@@ -154,7 +152,7 @@ struct TransmitBodyPromiseRejectionHandler {
 }
 
 impl Callback for TransmitBodyPromiseRejectionHandler {
-    fn callback(&self, cx: *mut UnSafeJSContext, v: HandleValue) {
+    fn callback(&self, _cx: JSContext, _v: HandleValue) {
         // TODO: terminate fetch.
         return self.stream.stop_reading();
     }
@@ -431,18 +429,15 @@ struct ConsumeBodyPromiseRejectionHandler {
 }
 
 impl Callback for ConsumeBodyPromiseRejectionHandler {
-    #[allow(unsafe_code)]
-    fn callback(&self, cx: *mut UnSafeJSContext, v: HandleValue) {
-        let cx = unsafe { JSContext::from_ptr(cx) };
+    fn callback(&self, cx: JSContext, v: HandleValue) {
         self.result_promise.reject(cx, v);
     }
 }
 
 impl Callback for ConsumeBodyPromiseHandler {
-    #[allow(unsafe_code)]
     /// Step 4 of <https://fetch.spec.whatwg.org/#concept-body-consume-body>
-    fn callback(&self, cx: *mut UnSafeJSContext, v: HandleValue) {
-        let cx = unsafe { JSContext::from_ptr(cx) };
+    #[allow(unsafe_code)]
+    fn callback(&self, cx: JSContext, v: HandleValue) {
         let is_done = match get_read_promise_done(cx.clone(), &v) {
             Ok(is_done) => is_done,
             Err(err) => {
