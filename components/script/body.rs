@@ -16,14 +16,15 @@ use crate::dom::bindings::reflector::DomObject;
 use crate::dom::bindings::root::DomRoot;
 use crate::dom::bindings::str::{is_token, ByteString, DOMString, USVString};
 use crate::dom::bindings::trace::RootedTraceableBox;
-use crate::dom::bindings::utils::get_dictionary_property;
 use crate::dom::blob::{normalize_type_string, Blob};
 use crate::dom::formdata::FormData;
 use crate::dom::globalscope::GlobalScope;
 use crate::dom::htmlformelement::{encode_multipart_form_data, generate_boundary};
 use crate::dom::promise::Promise;
 use crate::dom::promisenativehandler::{Callback, PromiseNativeHandler};
-use crate::dom::readablestream::{ExternalUnderlyingSource, ReadableStream};
+use crate::dom::readablestream::{
+    get_read_promise_bytes, get_read_promise_done, ExternalUnderlyingSource, ReadableStream,
+};
 use crate::dom::urlsearchparams::URLSearchParams;
 use crate::realms::{AlreadyInRealm, InRealm};
 use crate::script_runtime::JSContext;
@@ -434,48 +435,6 @@ impl Callback for ConsumeBodyPromiseRejectionHandler {
     fn callback(&self, cx: *mut UnSafeJSContext, v: HandleValue) {
         let cx = unsafe { JSContext::from_ptr(cx) };
         self.result_promise.reject(cx, v);
-    }
-}
-
-#[allow(unsafe_code)]
-fn get_read_promise_done(cx: JSContext, v: &HandleValue) -> Result<bool, Error> {
-    unsafe {
-        rooted!(in(*cx) let object = v.to_object());
-        rooted!(in(*cx) let mut done = UndefinedValue());
-        let has_done =
-            get_dictionary_property(*cx, object.handle(), "done", done.handle_mut()).is_ok();
-
-        if !has_done {
-            return Err(Error::Type("".to_string()));
-        }
-
-        let is_done = match bool::from_jsval(*cx, done.handle(), ()) {
-            Ok(ConversionResult::Success(val)) => val,
-            _ => panic!("Couldn't convert jsval to boolean"),
-        };
-
-        Ok(is_done)
-    }
-}
-
-#[allow(unsafe_code)]
-fn get_read_promise_bytes(cx: JSContext, v: &HandleValue) -> Result<Vec<u8>, Error> {
-    unsafe {
-        rooted!(in(*cx) let object = v.to_object());
-        rooted!(in(*cx) let mut bytes = UndefinedValue());
-        let has_value =
-            get_dictionary_property(*cx, object.handle(), "value", bytes.handle_mut()).is_ok();
-
-        if !has_value {
-            return Err(Error::Type("".to_string()));
-        }
-
-        let chunk =
-            match Vec::<u8>::from_jsval(*cx, bytes.handle(), ConversionBehavior::EnforceRange) {
-                Ok(ConversionResult::Success(val)) => val,
-                _ => panic!("Couldn't convert jsval to Vec<u8>"),
-            };
-        Ok(chunk)
     }
 }
 

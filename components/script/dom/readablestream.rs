@@ -3,12 +3,16 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use crate::dom::bindings::codegen::Bindings::ReadableStreamBinding;
+use crate::dom::bindings::conversions::{ConversionBehavior, ConversionResult};
+use crate::dom::bindings::error::Error;
 use crate::dom::bindings::reflector::{reflect_dom_object, DomObject, MutDomObject, Reflector};
 use crate::dom::bindings::root::DomRoot;
+use crate::dom::bindings::utils::get_dictionary_property;
 use crate::dom::bindings::utils::set_dictionary_property;
 use crate::dom::bindings::utils::AsCCharPtrPtr;
 use crate::dom::globalscope::GlobalScope;
 use crate::dom::promise::Promise;
+use crate::js::conversions::FromJSValConvertible;
 use crate::realms::{AlreadyInRealm, InRealm};
 use crate::script_runtime::JSContext as SafeJSContext;
 use dom_struct::dom_struct;
@@ -21,6 +25,7 @@ use js::jsapi::{
     ReadableStreamUpdateDataAvailableFromSource, RemoveRawValueRoot, UnwrapReadableStream,
 };
 use js::jsval::{JSVal, ObjectValue, UndefinedValue};
+use js::rust::{HandleObject as SafeHandleObject, HandleValue as SafeHandleValue};
 use js::rust::{IntoHandle, Runtime};
 use std::cell::{Cell, RefCell};
 use std::os::raw::c_void;
@@ -282,5 +287,49 @@ impl ExternalUnderlyingSourceWrapper {
             ExternalUnderlyingSource::Memory(vec) => Some(vec.clone()),
             ExternalUnderlyingSource::Async => None,
         }
+    }
+}
+
+#[allow(unsafe_code)]
+/// Get the `done` property of an object that a read promise resolved to.
+pub fn get_read_promise_done(cx: SafeJSContext, v: &SafeHandleValue) -> Result<bool, Error> {
+    unsafe {
+        rooted!(in(*cx) let object = v.to_object());
+        rooted!(in(*cx) let mut done = UndefinedValue());
+        let has_done =
+            get_dictionary_property(*cx, object.handle(), "done", done.handle_mut()).is_ok();
+
+        if !has_done {
+            return Err(Error::Type("".to_string()));
+        }
+
+        let is_done = match bool::from_jsval(*cx, done.handle(), ()) {
+            Ok(ConversionResult::Success(val)) => val,
+            _ => panic!("Couldn't convert jsval to boolean"),
+        };
+
+        Ok(is_done)
+    }
+}
+
+#[allow(unsafe_code)]
+/// Get the `value` property of an object that a read promise resolved to.
+pub fn get_read_promise_bytes(cx: SafeJSContext, v: &SafeHandleValue) -> Result<Vec<u8>, Error> {
+    unsafe {
+        rooted!(in(*cx) let object = v.to_object());
+        rooted!(in(*cx) let mut bytes = UndefinedValue());
+        let has_value =
+            get_dictionary_property(*cx, object.handle(), "value", bytes.handle_mut()).is_ok();
+
+        if !has_value {
+            return Err(Error::Type("".to_string()));
+        }
+
+        let chunk =
+            match Vec::<u8>::from_jsval(*cx, bytes.handle(), ConversionBehavior::EnforceRange) {
+                Ok(ConversionResult::Success(val)) => val,
+                _ => panic!("Couldn't convert jsval to Vec<u8>"),
+            };
+        Ok(chunk)
     }
 }
