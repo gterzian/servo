@@ -436,7 +436,6 @@ impl Callback for ConsumeBodyPromiseRejectionHandler {
 
 impl Callback for ConsumeBodyPromiseHandler {
     /// Step 4 of <https://fetch.spec.whatwg.org/#concept-body-consume-body>
-    #[allow(unsafe_code)]
     fn callback(&self, cx: JSContext, v: HandleValue) {
         let is_done = match get_read_promise_done(cx.clone(), &v) {
             Ok(is_done) => is_done,
@@ -480,10 +479,8 @@ impl Callback for ConsumeBodyPromiseHandler {
                 result_promise: self.result_promise.clone(),
             });
 
-            let global = unsafe {
-                let in_realm_proof = AlreadyInRealm::assert_for_cx(cx);
-                GlobalScope::from_context(*cx, InRealm::Already(&in_realm_proof))
-            };
+            let in_realm_proof = AlreadyInRealm::assert_for_cx(cx);
+            let global = GlobalScope::from_safe_context(cx, InRealm::Already(&in_realm_proof));
 
             let handler =
                 PromiseNativeHandler::new(&global, Some(promise_handler), Some(rejection_handler));
@@ -551,7 +548,6 @@ pub fn consume_body_with_promise<T: BodyOperations + DomObject>(
 }
 
 // https://fetch.spec.whatwg.org/#concept-body-package-data
-#[allow(unsafe_code)]
 fn run_package_data_algorithm(
     cx: JSContext,
     bytes: Vec<u8>,
@@ -560,7 +556,7 @@ fn run_package_data_algorithm(
 ) -> Fallible<FetchedData> {
     let mime = &*mime_type;
     let in_realm_proof = AlreadyInRealm::assert_for_cx(cx);
-    let global = unsafe { GlobalScope::from_context(*cx, InRealm::Already(&in_realm_proof)) };
+    let global = GlobalScope::from_safe_context(cx, InRealm::Already(&in_realm_proof));
     match body_type {
         BodyType::Text => run_text_data_algorithm(bytes),
         BodyType::Json => run_json_data_algorithm(cx, bytes),

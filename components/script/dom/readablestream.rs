@@ -89,15 +89,13 @@ impl ReadableStream {
         obj: *mut JSObject,
         source: Option<ExternalUnderlyingSourceWrapper>,
     ) -> DomRoot<ReadableStream> {
-        unsafe {
-            let in_realm_proof = AlreadyInRealm::assert_for_cx(cx);
-            let global = GlobalScope::from_context(*cx, InRealm::Already(&in_realm_proof));
+        let in_realm_proof = AlreadyInRealm::assert_for_cx(cx);
+        let global = GlobalScope::from_safe_context(cx, InRealm::Already(&in_realm_proof));
 
-            let stream = ReadableStream::new(&global, source);
-            stream.js_stream.set(UnwrapReadableStream(obj));
+        let stream = ReadableStream::new(&global, source);
+        unsafe { stream.js_stream.set(UnwrapReadableStream(obj)) };
 
-            stream
-        }
+        stream
     }
 
     /// Build a stream backed by a Rust underlying source.
