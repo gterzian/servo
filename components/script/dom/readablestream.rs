@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+use crate::dom::bindings::cell::DomRefCell;
 use crate::dom::bindings::codegen::Bindings::ReadableStreamBinding;
 use crate::dom::bindings::conversions::{ConversionBehavior, ConversionResult};
 use crate::dom::bindings::error::Error;
@@ -42,7 +43,7 @@ pub struct ReadableStream {
     js_reader: Heap<*mut JSObject>,
     has_reader: Cell<bool>,
     #[ignore_malloc_size_of = "Traits are hard"]
-    external_underlying_source: Option<ExternalUnderlyingSourceWrapper>,
+    external_underlying_source: DomRefCell<Option<ExternalUnderlyingSourceWrapper>>,
 }
 
 impl ReadableStream {
@@ -54,7 +55,7 @@ impl ReadableStream {
             js_stream: Heap::default(),
             js_reader: Heap::default(),
             has_reader: Default::default(),
-            external_underlying_source,
+            external_underlying_source: DomRefCell::new(external_underlying_source),
         }
     }
 
@@ -125,6 +126,7 @@ impl ReadableStream {
     /// Hack to make partial integration easier
     pub fn clone_body(&self) -> Option<Vec<u8>> {
         self.external_underlying_source
+            .borrow()
             .as_ref()
             .and_then(|source| source.clone_body())
     }
@@ -239,8 +241,27 @@ unsafe extern "C" fn request_data(
     stream: HandleObject,
     desired_size: usize,
 ) {
-    let source = &mut *(source as *mut ExternalUnderlyingSourceWrapper);
+    let source = &*(source as *const ExternalUnderlyingSourceWrapper);
     source.pull(SafeJSContext::from_ptr(cx), stream, desired_size);
+}
+
+#[allow(unsafe_code)]
+unsafe extern "C" fn write_into_read_request_buffer(
+    source: *const c_void,
+    cx: *mut JSContext,
+    stream: HandleObject,
+    buffer: *mut c_void,
+    length: usize,
+    bytes_written: *mut usize,
+) {
+    let source = &*(source as *const ExternalUnderlyingSourceWrapper);
+    source.write_into_buffer(
+        SafeJSContext::from_ptr(cx),
+        stream,
+        buffer,
+        length,
+        bytes_written,
+    );
 }
 
 pub enum ExternalUnderlyingSource {
@@ -261,10 +282,24 @@ impl ExternalUnderlyingSourceWrapper {
     }
 
     #[allow(unsafe_code)]
+    pub fn enqueue_chunk(&self, cx: SafeJSContext, stream: HandleObject, chunk: &[u8]) {
+        let available = match &mut *self.source.borrow_mut() {
+            ExternalUnderlyingSource::Memory(vec) => {
+                vec.extend_from_slice(chunk);
+                vec.len()
+            },
+            ExternalUnderlyingSource::Async => panic!("not implemented yet."),
+        };
+        unsafe {
+            ReadableStreamUpdateDataAvailableFromSource(*cx, stream, available as u32);
+        }
+    }
+
+    #[allow(unsafe_code)]
     fn create_js_wrapper(&mut self) -> *mut ReadableStreamUnderlyingSource {
         let mut traps = ReadableStreamUnderlyingSourceTraps {
             requestData: Some(request_data),
-            writeIntoReadRequestBuffer: None,
+            writeIntoReadRequestBuffer: Some(write_into_read_request_buffer),
             cancel: None,
             onClosed: None,
             onErrored: None,
@@ -274,14 +309,42 @@ impl ExternalUnderlyingSourceWrapper {
     }
 
     #[allow(unsafe_code)]
-    fn pull(&mut self, cx: SafeJSContext, stream: HandleObject, desired_size: usize) {
+    fn pull(&self, cx: SafeJSContext, stream: HandleObject, desired_size: usize) {
         let available = match &*self.source.borrow() {
-            ExternalUnderlyingSource::Memory(vec) => vec.len(),
+            ExternalUnderlyingSource::Memory(vec) => {
+                // We have bytes immediately available in memory.
+                let available = vec.len();
+                unsafe {
+                    ReadableStreamUpdateDataAvailableFromSource(*cx, stream, available as u32);
+                }
+            },
             ExternalUnderlyingSource::Async => panic!("not implemented yet."),
         };
-        unsafe {
-            ReadableStreamUpdateDataAvailableFromSource(*cx, stream, available as u32);
-        }
+    }
+
+    #[allow(unsafe_code)]
+    fn write_into_buffer(
+        &self,
+        cx: SafeJSContext,
+        stream: HandleObject,
+        buffer: *mut c_void,
+        length: usize,
+        bytes_written: *mut usize,
+    ) {
+        match &mut *self.source.borrow_mut() {
+            ExternalUnderlyingSource::Memory(vec) => {
+                assert!(vec.len() >= length as usize);
+                let mut source = vec.split_off(length);
+                unsafe {
+                    ptr::copy_nonoverlapping(
+                        buffer,
+                        source.as_mut_ptr() as *mut _ as *mut c_void,
+                        source.len(),
+                    );
+                };
+            },
+            ExternalUnderlyingSource::Async => panic!("not implemented yet."),
+        };
     }
 
     fn clone_body(&self) -> Option<Vec<u8>> {
