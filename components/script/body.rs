@@ -481,7 +481,7 @@ impl Callback for ConsumeBodyPromiseHandler {
             });
 
             let global = unsafe {
-                let in_realm_proof = AlreadyInRealm::assert_for_cx(cx.clone());
+                let in_realm_proof = AlreadyInRealm::assert_for_cx(cx);
                 GlobalScope::from_context(*cx, InRealm::Already(&in_realm_proof))
             };
 
@@ -559,7 +559,7 @@ fn run_package_data_algorithm(
     mime_type: Vec<u8>,
 ) -> Fallible<FetchedData> {
     let mime = &*mime_type;
-    let in_realm_proof = AlreadyInRealm::assert_for_cx(cx.clone());
+    let in_realm_proof = AlreadyInRealm::assert_for_cx(cx);
     let global = unsafe { GlobalScope::from_context(*cx, InRealm::Already(&in_realm_proof)) };
     match body_type {
         BodyType::Text => run_text_data_algorithm(bytes),
