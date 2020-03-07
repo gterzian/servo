@@ -392,7 +392,7 @@ fn obtain_response(
             headers.typed_insert(ContentLength(request_len as u64));
             let (body_chan, body_port) = ipc::channel().unwrap();
 
-            let (sender, receiver) = channel(0);
+            let (sender, receiver) = channel(1);
 
             let _ = chunk_requester.send(BodyChunkRequest::Connect(body_chan.clone()));
 
@@ -427,7 +427,7 @@ fn obtain_response(
             if *load_data_method != Method::GET && *load_data_method != Method::HEAD {
                 headers.typed_insert(ContentLength(0))
             }
-            let (_sender, mut receiver) = channel(0);
+            let (_sender, mut receiver) = channel(1);
 
             receiver.close();
 
