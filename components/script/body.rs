@@ -266,7 +266,6 @@ impl Extractable for BodyInit {
 
 impl Extractable for Vec<u8> {
     fn extract(&self) -> ExtractedBody {
-        // TODO: use a stream with a native underlying source.
         let bytes = self.clone();
         let total_bytes = self.len();
         ExtractedBody {
@@ -283,18 +282,14 @@ impl Extractable for Vec<u8> {
 
 impl Extractable for Blob {
     fn extract(&self) -> ExtractedBody {
-        // TODO: use a stream with a native underlying source.
         let content_type = if self.Type().as_ref().is_empty() {
             None
         } else {
             Some(self.Type())
         };
-        let bytes = self.get_bytes().unwrap_or(vec![]);
-        let total_bytes = bytes.len();
+        let total_bytes = self.Size() as usize;
         ExtractedBody {
-            stream: ReadableStream::new_with_external_underlying_source(
-                ExternalUnderlyingSource::Memory(bytes),
-            ),
+            stream: self.get_stream(),
             total_bytes,
             content_type,
             source: BodySource::Blob,
@@ -304,7 +299,6 @@ impl Extractable for Blob {
 
 impl Extractable for DOMString {
     fn extract(&self) -> ExtractedBody {
-        // TODO: use a stream with a native underlying source.
         let bytes = self.as_bytes().to_owned();
         let total_bytes = bytes.len();
         let content_type = Some(DOMString::from("text/plain;charset=UTF-8"));
@@ -321,7 +315,6 @@ impl Extractable for DOMString {
 
 impl Extractable for FormData {
     fn extract(&self) -> ExtractedBody {
-        // TODO: use a stream with a native underlying source.
         let boundary = generate_boundary();
         let bytes = encode_multipart_form_data(&mut self.datums(), boundary.clone(), UTF_8);
         let total_bytes = bytes.len();
@@ -342,7 +335,6 @@ impl Extractable for FormData {
 
 impl Extractable for URLSearchParams {
     fn extract(&self) -> ExtractedBody {
-        // TODO: use a stream with a native underlying source.
         let bytes = self.serialize_utf8().into_bytes();
         let total_bytes = bytes.len();
         let content_type = Some(DOMString::from(

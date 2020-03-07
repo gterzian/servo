@@ -5,7 +5,6 @@
 use crate::body::{Extractable, ExtractedBody};
 use crate::document_loader::DocumentLoader;
 use crate::dom::bindings::cell::DomRefCell;
-use crate::dom::bindings::codegen::Bindings::BlobBinding::BlobBinding::BlobMethods;
 use crate::dom::bindings::codegen::Bindings::WindowBinding::WindowMethods;
 use crate::dom::bindings::codegen::Bindings::XMLHttpRequestBinding;
 use crate::dom::bindings::codegen::Bindings::XMLHttpRequestBinding::XMLHttpRequestMethods;
