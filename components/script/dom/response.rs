@@ -4,7 +4,7 @@
 
 use crate::body::{consume_body, consume_body_with_promise, BodyOperations, BodyType};
 use crate::body::{Extractable, ExtractedBody};
-use crate::dom::bindings::cell::{DomRefCell, Ref};
+use crate::dom::bindings::cell::DomRefCell;
 use crate::dom::bindings::codegen::Bindings::HeadersBinding::{HeadersInit, HeadersMethods};
 use crate::dom::bindings::codegen::Bindings::ResponseBinding;
 use crate::dom::bindings::codegen::Bindings::ResponseBinding::{
@@ -133,9 +133,9 @@ impl Response {
             // Step 7.3
             let ExtractedBody {
                 stream,
-                total_bytes,
+                total_bytes: _,
                 content_type,
-                source,
+                source: _,
             } = body.extract();
 
             let body = stream

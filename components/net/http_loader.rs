@@ -16,7 +16,6 @@ use devtools_traits::{
     ChromeToDevtoolsControlMsg, DevtoolsControlMsg, HttpRequest as DevtoolsHttpRequest,
 };
 use devtools_traits::{HttpResponse as DevtoolsHttpResponse, NetworkEvent};
-use futures::future::IntoFuture;
 use headers::authorization::Basic;
 use headers::{AccessControlAllowCredentials, AccessControlAllowHeaders, HeaderMapExt};
 use headers::{
@@ -37,7 +36,7 @@ use net_traits::quality::{quality_to_value, Quality, QualityItem};
 use net_traits::request::Origin::Origin as SpecificOrigin;
 use net_traits::request::{is_cors_safelisted_method, is_cors_safelisted_request_header};
 use net_traits::request::{
-    BodyChunkRequest, RedirectMode, Referrer, Request, RequestBody, RequestBuilder, RequestMode,
+    BodyChunkRequest, RedirectMode, Referrer, Request, RequestBuilder, RequestMode,
 };
 use net_traits::request::{CacheMode, CredentialsMode, Destination, Origin};
 use net_traits::request::{ResponseTainting, ServiceWorkersMode};

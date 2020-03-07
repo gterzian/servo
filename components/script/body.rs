@@ -3,18 +3,14 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 use crate::dom::bindings::cell::DomRefCell;
-use crate::dom::bindings::cell::Ref;
 use crate::dom::bindings::codegen::Bindings::BlobBinding::BlobBinding::BlobMethods;
 use crate::dom::bindings::codegen::Bindings::FormDataBinding::FormDataMethods;
 use crate::dom::bindings::codegen::Bindings::XMLHttpRequestBinding::BodyInit;
-use crate::dom::bindings::conversions::{
-    ConversionBehavior, ConversionResult, FromJSValConvertible,
-};
 use crate::dom::bindings::error::{Error, Fallible};
-use crate::dom::bindings::refcounted::{Trusted, TrustedPromise};
+use crate::dom::bindings::refcounted::Trusted;
 use crate::dom::bindings::reflector::DomObject;
 use crate::dom::bindings::root::DomRoot;
-use crate::dom::bindings::str::{is_token, ByteString, DOMString, USVString};
+use crate::dom::bindings::str::{DOMString, USVString};
 use crate::dom::bindings::trace::RootedTraceableBox;
 use crate::dom::blob::{normalize_type_string, Blob};
 use crate::dom::formdata::FormData;
@@ -32,25 +28,22 @@ use crate::task::TaskCanceller;
 use crate::task_source::networking::NetworkingTaskSource;
 use crate::task_source::TaskSource;
 use crate::task_source::TaskSourceName;
-use encoding_rs::{Encoding, UTF_8};
+use encoding_rs::UTF_8;
 use ipc_channel::ipc::{self, IpcSender};
 use ipc_channel::router::ROUTER;
 use js::jsapi::Heap;
-use js::jsapi::JSContext as UnSafeJSContext;
 use js::jsapi::JSObject;
 use js::jsapi::JS_ClearPendingException;
-use js::jsapi::JS_GetUint8ArrayData;
 use js::jsapi::Value as JSValue;
 use js::jsval::JSVal;
 use js::jsval::UndefinedValue;
 use js::rust::wrappers::JS_GetPendingException;
 use js::rust::wrappers::JS_ParseJSON;
-use js::rust::{HandleObject, HandleValue};
+use js::rust::HandleValue;
 use js::typedarray::{ArrayBuffer, CreateWith};
 use mime::{self, Mime};
 use net_traits::request::{BodyChunkRequest, BodySource, RequestBody};
 use script_traits::serializable::BlobImpl;
-use std::cell::RefCell;
 use std::ptr;
 use std::rc::Rc;
 use std::str;
@@ -185,7 +178,7 @@ impl ExtractedBody {
         let ExtractedBody {
             stream,
             total_bytes,
-            content_type,
+            content_type: _,
             source,
         } = self;
 

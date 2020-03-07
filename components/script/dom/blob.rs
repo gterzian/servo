@@ -225,7 +225,7 @@ impl BlobMethods for Blob {
     }
 
     // <https://w3c.github.io/FileAPI/#blob-get-stream>
-    fn Stream(&self, cx: JSContext) -> NonNull<JSObject> {
+    fn Stream(&self, _cx: JSContext) -> NonNull<JSObject> {
         self.get_stream().get_js_stream()
     }
 

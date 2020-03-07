@@ -6,11 +6,9 @@ use crate::dom::bindings::cell::DomRefCell;
 use crate::dom::bindings::codegen::Bindings::ReadableStreamBinding;
 use crate::dom::bindings::conversions::{ConversionBehavior, ConversionResult};
 use crate::dom::bindings::error::Error;
-use crate::dom::bindings::reflector::{reflect_dom_object, DomObject, MutDomObject, Reflector};
+use crate::dom::bindings::reflector::{reflect_dom_object, DomObject, Reflector};
 use crate::dom::bindings::root::DomRoot;
 use crate::dom::bindings::utils::get_dictionary_property;
-use crate::dom::bindings::utils::set_dictionary_property;
-use crate::dom::bindings::utils::AsCCharPtrPtr;
 use crate::dom::globalscope::GlobalScope;
 use crate::dom::promise::Promise;
 use crate::js::conversions::FromJSValConvertible;
@@ -19,16 +17,16 @@ use crate::script_runtime::JSContext as SafeJSContext;
 use dom_struct::dom_struct;
 use js::glue::{CreateReadableStreamUnderlyingSource, ReadableStreamUnderlyingSourceTraps};
 use js::jsapi::{
-    AddRawValueRoot, HandleObject, Heap, IsReadableStream, JSContext, JSObject, JS_NewObject,
+    HandleObject, Heap, IsReadableStream, JSContext, JSObject,
     NewReadableExternalSourceStreamObject, ReadableStreamDefaultReaderRead, ReadableStreamError,
     ReadableStreamGetReader, ReadableStreamIsDisturbed, ReadableStreamIsLocked,
     ReadableStreamReaderMode, ReadableStreamReaderReleaseLock, ReadableStreamUnderlyingSource,
-    ReadableStreamUpdateDataAvailableFromSource, RemoveRawValueRoot, UnwrapReadableStream,
+    ReadableStreamUpdateDataAvailableFromSource, UnwrapReadableStream,
 };
-use js::jsval::{JSVal, ObjectValue, UndefinedValue};
-use js::rust::{HandleObject as SafeHandleObject, HandleValue as SafeHandleValue};
-use js::rust::{IntoHandle, Runtime};
-use std::cell::{Cell, RefCell};
+use js::jsval::UndefinedValue;
+use js::rust::HandleValue as SafeHandleValue;
+use js::rust::IntoHandle;
+use std::cell::Cell;
 use std::os::raw::c_void;
 use std::ptr::{self, NonNull};
 use std::rc::Rc;
@@ -101,7 +99,7 @@ impl ReadableStream {
     /// Build a stream backed by a Rust underlying source.
     #[allow(unsafe_code)]
     pub fn new_with_external_underlying_source(
-        mut source: ExternalUnderlyingSource,
+        source: ExternalUnderlyingSource,
     ) -> DomRoot<ReadableStream> {
         let mut source = ExternalUnderlyingSourceWrapper::new(source);
         unsafe {
@@ -363,7 +361,7 @@ impl ExternalUnderlyingSourceWrapper {
         self.signal_available_bytes(cx, stream);
     }
 
-    fn pull(&self, cx: SafeJSContext, stream: HandleObject, desired_size: usize) {
+    fn pull(&self, cx: SafeJSContext, stream: HandleObject, _desired_size: usize) {
         // Note: for pull sources,
         // this would be the time to ask for a chunk.
         self.signal_available_bytes(cx, stream);
@@ -372,13 +370,13 @@ impl ExternalUnderlyingSourceWrapper {
     #[allow(unsafe_code)]
     fn write_into_buffer(
         &self,
-        cx: SafeJSContext,
-        stream: HandleObject,
+        _cx: SafeJSContext,
+        _stream: HandleObject,
         buffer: *mut c_void,
         length: usize,
         bytes_written: *mut usize,
     ) {
-        let mut source = match &mut *self.source.borrow_mut() {
+        let source = match &mut *self.source.borrow_mut() {
             ExternalUnderlyingSource::Memory(vec) => {
                 assert!(vec.len() >= length as usize);
                 vec.split_off(length)
@@ -391,10 +389,11 @@ impl ExternalUnderlyingSourceWrapper {
         };
         unsafe {
             ptr::copy_nonoverlapping(
+                source.as_ptr() as *const _ as *const c_void,
                 buffer,
-                source.as_mut_ptr() as *mut _ as *mut c_void,
                 source.len(),
             );
+            *bytes_written = length;
         };
     }
 

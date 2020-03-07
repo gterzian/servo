@@ -2,9 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+use crate::body::Extractable;
 use crate::body::{consume_body, BodyOperations, BodyType};
-use crate::body::{Extractable, ExtractedBody};
-use crate::dom::bindings::cell::{DomRefCell, Ref};
+use crate::dom::bindings::cell::DomRefCell;
 use crate::dom::bindings::codegen::Bindings::HeadersBinding::{HeadersInit, HeadersMethods};
 use crate::dom::bindings::codegen::Bindings::RequestBinding;
 use crate::dom::bindings::codegen::Bindings::RequestBinding::ReferrerPolicy;
@@ -24,24 +24,19 @@ use crate::dom::bindings::trace::RootedTraceableBox;
 use crate::dom::globalscope::GlobalScope;
 use crate::dom::headers::{Guard, Headers};
 use crate::dom::promise::Promise;
-use crate::dom::readablestream::{ExternalUnderlyingSource, ReadableStream};
-use crate::task_source::TaskSourceName;
+use crate::dom::readablestream::ReadableStream;
 use dom_struct::dom_struct;
 use http::header::{HeaderName, HeaderValue};
 use http::method::InvalidMethod;
 use http::Method as HttpMethod;
-use ipc_channel::ipc::{self, IpcSender};
-use ipc_channel::router::ROUTER;
-use js::jsapi::JSContext;
-use js::rust::HandleValue;
 use net_traits::request::CacheMode as NetTraitsRequestCache;
 use net_traits::request::CredentialsMode as NetTraitsRequestCredentials;
 use net_traits::request::Destination as NetTraitsRequestDestination;
 use net_traits::request::RedirectMode as NetTraitsRequestRedirect;
 use net_traits::request::Referrer as NetTraitsRequestReferrer;
+use net_traits::request::Request as NetTraitsRequest;
 use net_traits::request::RequestMode as NetTraitsRequestMode;
 use net_traits::request::{Origin, Window};
-use net_traits::request::{Request as NetTraitsRequest, RequestBody};
 use net_traits::ReferrerPolicy as MsgReferrerPolicy;
 use servo_url::ServoUrl;
 use std::cell::Cell;
@@ -477,13 +472,6 @@ impl Request {
 
         // Step 42
         Ok(r)
-    }
-
-    // https://fetch.spec.whatwg.org/#concept-body-locked
-    fn locked(&self) -> bool {
-        // TODO: ReadableStream is unimplemented. Just return false
-        // for now.
-        false
     }
 }
 
