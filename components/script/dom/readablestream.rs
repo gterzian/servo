@@ -20,7 +20,7 @@ use dom_struct::dom_struct;
 use js::glue::{CreateReadableStreamUnderlyingSource, ReadableStreamUnderlyingSourceTraps};
 use js::jsapi::{
     AddRawValueRoot, HandleObject, Heap, IsReadableStream, JSContext, JSObject, JS_NewObject,
-    NewReadableExternalSourceStreamObject, ReadableStreamDefaultReaderRead,
+    NewReadableExternalSourceStreamObject, ReadableStreamDefaultReaderRead, ReadableStreamError,
     ReadableStreamGetReader, ReadableStreamIsDisturbed, ReadableStreamIsLocked,
     ReadableStreamReaderMode, ReadableStreamReaderReleaseLock, ReadableStreamUnderlyingSource,
     ReadableStreamUpdateDataAvailableFromSource, RemoveRawValueRoot, UnwrapReadableStream,
@@ -30,7 +30,7 @@ use js::rust::{HandleObject as SafeHandleObject, HandleValue as SafeHandleValue}
 use js::rust::{IntoHandle, Runtime};
 use std::cell::{Cell, RefCell};
 use std::os::raw::c_void;
-use std::ptr;
+use std::ptr::{self, NonNull};
 use std::rc::Rc;
 
 #[dom_struct]
@@ -42,8 +42,7 @@ pub struct ReadableStream {
     #[ignore_malloc_size_of = "SM handles JS values"]
     js_reader: Heap<*mut JSObject>,
     has_reader: Cell<bool>,
-    #[ignore_malloc_size_of = "Traits are hard"]
-    external_underlying_source: DomRefCell<Option<ExternalUnderlyingSourceWrapper>>,
+    external_underlying_source: Option<ExternalUnderlyingSourceWrapper>,
 }
 
 impl ReadableStream {
@@ -55,11 +54,11 @@ impl ReadableStream {
             js_stream: Heap::default(),
             js_reader: Heap::default(),
             has_reader: Default::default(),
-            external_underlying_source: DomRefCell::new(external_underlying_source),
+            external_underlying_source: external_underlying_source,
         }
     }
 
-    pub fn new(
+    fn new(
         global: &GlobalScope,
         external_underlying_source: Option<ExternalUnderlyingSourceWrapper>,
     ) -> DomRoot<ReadableStream> {
@@ -123,12 +122,46 @@ impl ReadableStream {
         }
     }
 
+    /// Get a pointer to the underlying JS object.
+    pub fn get_js_stream(&self) -> NonNull<JSObject> {
+        NonNull::new(self.js_stream.get())
+            .expect("Couldn't get a non-null pointer to JS stream object.")
+    }
+
     /// Hack to make partial integration easier
     pub fn clone_body(&self) -> Option<Vec<u8>> {
         self.external_underlying_source
-            .borrow()
             .as_ref()
             .and_then(|source| source.clone_body())
+    }
+
+    #[allow(unsafe_code)]
+    pub fn enqueue_native(&self, bytes: Vec<u8>) {
+        let global = GlobalScope::current().expect("No current global object.");
+        let cx = global.get_cx();
+
+        let stream_handle = unsafe { self.js_stream.handle() };
+
+        self.external_underlying_source
+            .as_ref()
+            .expect("No external source to enqueue bytes.")
+            .enqueue_chunk(cx, stream_handle, bytes);
+    }
+
+    #[allow(unsafe_code)]
+    pub fn error_native(&self, error: Error) {
+        let global = GlobalScope::current().expect("No current global object.");
+        let cx = global.get_cx();
+
+        unsafe {
+            rooted!(in(*cx) let mut js_error = UndefinedValue());
+            error.to_jsval(*cx, &global, js_error.handle_mut());
+            ReadableStreamError(
+                *cx,
+                self.js_stream.handle(),
+                js_error.handle().into_handle(),
+            );
+        }
     }
 
     /// Acquires a reader and locks the stream,
@@ -264,34 +297,30 @@ unsafe extern "C" fn write_into_read_request_buffer(
     );
 }
 
+#[derive(Clone, JSTraceable, MallocSizeOf)]
 pub enum ExternalUnderlyingSource {
+    /// Facilitate partial integration with sources
+    /// that are currently read into memory.
     Memory(Vec<u8>),
-    /// TODO: Something wrapping ascync reading a Blob, etc...
-    Async,
+    /// A blob as underlying source, with a known total size.
+    Blob(usize),
 }
 
-pub struct ExternalUnderlyingSourceWrapper {
-    source: RefCell<ExternalUnderlyingSource>,
+#[derive(JSTraceable, MallocSizeOf)]
+struct ExternalUnderlyingSourceWrapper {
+    source: DomRefCell<ExternalUnderlyingSource>,
+    buffer: DomRefCell<Vec<u8>>,
 }
 
 impl ExternalUnderlyingSourceWrapper {
-    pub fn new(source: ExternalUnderlyingSource) -> ExternalUnderlyingSourceWrapper {
-        ExternalUnderlyingSourceWrapper {
-            source: RefCell::new(source),
-        }
-    }
-
-    #[allow(unsafe_code)]
-    pub fn enqueue_chunk(&self, cx: SafeJSContext, stream: HandleObject, chunk: &[u8]) {
-        let available = match &mut *self.source.borrow_mut() {
-            ExternalUnderlyingSource::Memory(vec) => {
-                vec.extend_from_slice(chunk);
-                vec.len()
-            },
-            ExternalUnderlyingSource::Async => panic!("not implemented yet."),
+    fn new(source: ExternalUnderlyingSource) -> ExternalUnderlyingSourceWrapper {
+        let buffer = match source {
+            ExternalUnderlyingSource::Blob(size) => Vec::with_capacity(size),
+            ExternalUnderlyingSource::Memory(_) => Vec::with_capacity(0),
         };
-        unsafe {
-            ReadableStreamUpdateDataAvailableFromSource(*cx, stream, available as u32);
+        ExternalUnderlyingSourceWrapper {
+            source: DomRefCell::new(source),
+            buffer: DomRefCell::new(buffer),
         }
     }
 
@@ -309,17 +338,35 @@ impl ExternalUnderlyingSourceWrapper {
     }
 
     #[allow(unsafe_code)]
-    fn pull(&self, cx: SafeJSContext, stream: HandleObject, desired_size: usize) {
+    fn signal_available_bytes(&self, cx: SafeJSContext, stream: HandleObject) {
         let available = match &*self.source.borrow() {
-            ExternalUnderlyingSource::Memory(vec) => {
-                // We have bytes immediately available in memory.
-                let available = vec.len();
-                unsafe {
-                    ReadableStreamUpdateDataAvailableFromSource(*cx, stream, available as u32);
-                }
-            },
-            ExternalUnderlyingSource::Async => panic!("not implemented yet."),
+            ExternalUnderlyingSource::Memory(vec) => vec.len(),
+            ExternalUnderlyingSource::Blob(_) => self.buffer.borrow().len(),
         };
+        if available > 0 {
+            // We have bytes available in memory, or from a blob push source.
+            unsafe {
+                ReadableStreamUpdateDataAvailableFromSource(*cx, stream, available as u32);
+            }
+        }
+    }
+
+    fn enqueue_chunk(&self, cx: SafeJSContext, stream: HandleObject, mut chunk: Vec<u8>) {
+        match &*self.source.borrow() {
+            ExternalUnderlyingSource::Blob(_) => {
+                self.buffer.borrow_mut().append(&mut chunk);
+            },
+            ExternalUnderlyingSource::Memory(_) => {
+                panic!("Memory source should not enqueue chunks.");
+            },
+        }
+        self.signal_available_bytes(cx, stream);
+    }
+
+    fn pull(&self, cx: SafeJSContext, stream: HandleObject, desired_size: usize) {
+        // Note: for pull sources,
+        // this would be the time to ask for a chunk.
+        self.signal_available_bytes(cx, stream);
     }
 
     #[allow(unsafe_code)]
@@ -331,26 +378,32 @@ impl ExternalUnderlyingSourceWrapper {
         length: usize,
         bytes_written: *mut usize,
     ) {
-        match &mut *self.source.borrow_mut() {
+        let mut source = match &mut *self.source.borrow_mut() {
             ExternalUnderlyingSource::Memory(vec) => {
                 assert!(vec.len() >= length as usize);
-                let mut source = vec.split_off(length);
-                unsafe {
-                    ptr::copy_nonoverlapping(
-                        buffer,
-                        source.as_mut_ptr() as *mut _ as *mut c_void,
-                        source.len(),
-                    );
-                };
+                vec.split_off(length)
             },
-            ExternalUnderlyingSource::Async => panic!("not implemented yet."),
+            ExternalUnderlyingSource::Blob(_) => {
+                let mut buffer = self.buffer.borrow_mut();
+                assert!(buffer.len() >= length as usize);
+                buffer.split_off(length)
+            },
+        };
+        unsafe {
+            ptr::copy_nonoverlapping(
+                buffer,
+                source.as_mut_ptr() as *mut _ as *mut c_void,
+                source.len(),
+            );
         };
     }
 
+    /// Hack to enable partial integration
+    /// for bodies that have already been read into memory.
     fn clone_body(&self) -> Option<Vec<u8>> {
         match &*self.source.borrow() {
             ExternalUnderlyingSource::Memory(vec) => Some(vec.clone()),
-            ExternalUnderlyingSource::Async => None,
+            ExternalUnderlyingSource::Blob(_) => None,
         }
     }
 }

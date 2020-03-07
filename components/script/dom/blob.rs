@@ -8,20 +8,24 @@ use crate::dom::bindings::codegen::Bindings::BlobBinding::BlobMethods;
 use crate::dom::bindings::codegen::UnionTypes::ArrayBufferOrArrayBufferViewOrBlobOrString;
 use crate::dom::bindings::error::{Error, Fallible};
 use crate::dom::bindings::reflector::{reflect_dom_object, DomObject, Reflector};
-use crate::dom::bindings::root::DomRoot;
+use crate::dom::bindings::root::{DomRoot, MutNullableDom};
 use crate::dom::bindings::serializable::{Serializable, StorageKey};
 use crate::dom::bindings::str::DOMString;
 use crate::dom::bindings::structuredclone::StructuredDataHolder;
 use crate::dom::globalscope::GlobalScope;
 use crate::dom::promise::Promise;
+use crate::dom::readablestream::ReadableStream;
 use crate::realms::{AlreadyInRealm, InRealm};
+use crate::script_runtime::JSContext;
 use dom_struct::dom_struct;
 use encoding_rs::UTF_8;
+use js::jsapi::JSObject;
 use msg::constellation_msg::{BlobId, BlobIndex, PipelineNamespaceId};
 use net_traits::filemanager_thread::RelativePos;
 use script_traits::serializable::BlobImpl;
 use std::collections::HashMap;
 use std::num::NonZeroU32;
+use std::ptr::NonNull;
 use std::rc::Rc;
 use uuid::Uuid;
 
@@ -30,15 +34,13 @@ use uuid::Uuid;
 pub struct Blob {
     reflector_: Reflector,
     blob_id: BlobId,
+    stream: MutNullableDom<ReadableStream>,
 }
 
 impl Blob {
     pub fn new(global: &GlobalScope, blob_impl: BlobImpl) -> DomRoot<Blob> {
         let dom_blob = reflect_dom_object(
-            Box::new(Blob {
-                reflector_: Reflector::new(),
-                blob_id: blob_impl.blob_id(),
-            }),
+            Box::new(Blob::new_inherited(&blob_impl)),
             global,
             BlobBinding::Wrap,
         );
@@ -51,6 +53,7 @@ impl Blob {
         Blob {
             reflector_: Reflector::new(),
             blob_id: blob_impl.blob_id(),
+            stream: MutNullableDom::new(None),
         }
     }
 
@@ -90,6 +93,12 @@ impl Blob {
     /// used by URL.createObjectURL
     pub fn get_blob_url_id(&self) -> Uuid {
         self.global().get_blob_url_id(&self.blob_id)
+    }
+
+    /// <https://w3c.github.io/FileAPI/#blob-get-stream>
+    pub fn get_stream(&self) -> DomRoot<ReadableStream> {
+        self.stream
+            .or_init(|| self.global().get_blob_stream(&self.blob_id))
     }
 }
 
@@ -213,6 +222,11 @@ impl BlobMethods for Blob {
     // https://w3c.github.io/FileAPI/#dfn-type
     fn Type(&self) -> DOMString {
         DOMString::from(self.type_string())
+    }
+
+    // <https://w3c.github.io/FileAPI/#blob-get-stream>
+    fn Stream(&self, cx: JSContext) -> NonNull<JSObject> {
+        self.get_stream().get_js_stream()
     }
 
     // https://w3c.github.io/FileAPI/#slice-method-algo
