@@ -8,7 +8,7 @@ use crate::dom::bindings::codegen::Bindings::BlobBinding::BlobMethods;
 use crate::dom::bindings::codegen::UnionTypes::ArrayBufferOrArrayBufferViewOrBlobOrString;
 use crate::dom::bindings::error::{Error, Fallible};
 use crate::dom::bindings::reflector::{reflect_dom_object, DomObject, Reflector};
-use crate::dom::bindings::root::{DomRoot, MutNullableDom};
+use crate::dom::bindings::root::DomRoot;
 use crate::dom::bindings::serializable::{Serializable, StorageKey};
 use crate::dom::bindings::str::DOMString;
 use crate::dom::bindings::structuredclone::StructuredDataHolder;
@@ -34,7 +34,6 @@ use uuid::Uuid;
 pub struct Blob {
     reflector_: Reflector,
     blob_id: BlobId,
-    stream: MutNullableDom<ReadableStream>,
 }
 
 impl Blob {
@@ -53,7 +52,6 @@ impl Blob {
         Blob {
             reflector_: Reflector::new(),
             blob_id: blob_impl.blob_id(),
-            stream: MutNullableDom::new(None),
         }
     }
 
@@ -97,8 +95,7 @@ impl Blob {
 
     /// <https://w3c.github.io/FileAPI/#blob-get-stream>
     pub fn get_stream(&self) -> DomRoot<ReadableStream> {
-        self.stream
-            .or_init(|| self.global().get_blob_stream(&self.blob_id))
+        self.global().get_blob_stream(&self.blob_id)
     }
 }
 

@@ -182,6 +182,8 @@ impl ExtractedBody {
             source,
         } = self;
 
+        // TODO: check for stream being locked or disturbed.
+
         let (chunk_request_sender, chunk_request_receiver) = ipc::channel().unwrap();
 
         let trusted_stream = Trusted::new(&*stream);

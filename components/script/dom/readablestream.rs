@@ -6,6 +6,7 @@ use crate::dom::bindings::cell::DomRefCell;
 use crate::dom::bindings::codegen::Bindings::ReadableStreamBinding;
 use crate::dom::bindings::conversions::{ConversionBehavior, ConversionResult};
 use crate::dom::bindings::error::Error;
+use crate::dom::bindings::refcounted::Trusted;
 use crate::dom::bindings::reflector::{reflect_dom_object, DomObject, Reflector};
 use crate::dom::bindings::root::DomRoot;
 use crate::dom::bindings::utils::get_dictionary_property;
@@ -14,15 +15,22 @@ use crate::dom::promise::Promise;
 use crate::js::conversions::FromJSValConvertible;
 use crate::realms::{AlreadyInRealm, InRealm};
 use crate::script_runtime::JSContext as SafeJSContext;
+use crate::task::TaskCanceller;
+use crate::task_source::dom_manipulation::DOMManipulationTaskSource;
+use crate::task_source::TaskSource;
+use crate::task_source::TaskSourceName;
 use dom_struct::dom_struct;
 use js::glue::{CreateReadableStreamUnderlyingSource, ReadableStreamUnderlyingSourceTraps};
+use js::jsapi::HandleValue;
 use js::jsapi::{
     HandleObject, Heap, IsReadableStream, JSContext, JSObject,
-    NewReadableExternalSourceStreamObject, ReadableStreamDefaultReaderRead, ReadableStreamError,
-    ReadableStreamGetReader, ReadableStreamIsDisturbed, ReadableStreamIsLocked,
-    ReadableStreamReaderMode, ReadableStreamReaderReleaseLock, ReadableStreamUnderlyingSource,
-    ReadableStreamUpdateDataAvailableFromSource, UnwrapReadableStream,
+    NewReadableExternalSourceStreamObject, ReadableStreamClose, ReadableStreamDefaultReaderRead,
+    ReadableStreamError, ReadableStreamGetReader, ReadableStreamIsDisturbed,
+    ReadableStreamIsLocked, ReadableStreamIsReadable, ReadableStreamReaderMode,
+    ReadableStreamReaderReleaseLock, ReadableStreamUpdateDataAvailableFromSource,
+    UnwrapReadableStream,
 };
+use js::jsval::JSVal;
 use js::jsval::UndefinedValue;
 use js::rust::HandleValue as SafeHandleValue;
 use js::rust::IntoHandle;
@@ -30,6 +38,7 @@ use std::cell::Cell;
 use std::os::raw::c_void;
 use std::ptr::{self, NonNull};
 use std::rc::Rc;
+use std::sync::Mutex;
 
 #[dom_struct]
 #[unrooted_must_root_lint::allow_unrooted_in_rc]
@@ -40,12 +49,13 @@ pub struct ReadableStream {
     #[ignore_malloc_size_of = "SM handles JS values"]
     js_reader: Heap<*mut JSObject>,
     has_reader: Cell<bool>,
-    external_underlying_source: Option<ExternalUnderlyingSourceWrapper>,
+    #[ignore_malloc_size_of = "SM handles JS values"]
+    external_underlying_source: Option<Rc<ExternalUnderlyingSourceController>>,
 }
 
 impl ReadableStream {
     fn new_inherited(
-        external_underlying_source: Option<ExternalUnderlyingSourceWrapper>,
+        external_underlying_source: Option<Rc<ExternalUnderlyingSourceController>>,
     ) -> ReadableStream {
         ReadableStream {
             reflector_: Reflector::new(),
@@ -58,7 +68,7 @@ impl ReadableStream {
 
     fn new(
         global: &GlobalScope,
-        external_underlying_source: Option<ExternalUnderlyingSourceWrapper>,
+        external_underlying_source: Option<Rc<ExternalUnderlyingSourceController>>,
     ) -> DomRoot<ReadableStream> {
         reflect_dom_object(
             Box::new(ReadableStream::new_inherited(external_underlying_source)),
@@ -85,7 +95,7 @@ impl ReadableStream {
     fn from_js_with_source(
         cx: SafeJSContext,
         obj: *mut JSObject,
-        source: Option<ExternalUnderlyingSourceWrapper>,
+        source: Option<Rc<ExternalUnderlyingSourceController>>,
     ) -> DomRoot<ReadableStream> {
         let in_realm_proof = AlreadyInRealm::assert_for_cx(cx);
         let global = GlobalScope::from_safe_context(cx, InRealm::Already(&in_realm_proof));
@@ -101,23 +111,48 @@ impl ReadableStream {
     pub fn new_with_external_underlying_source(
         source: ExternalUnderlyingSource,
     ) -> DomRoot<ReadableStream> {
-        let mut source = ExternalUnderlyingSourceWrapper::new(source);
-        unsafe {
-            let global = GlobalScope::current().expect("No current global object.");
-            let cx = global.get_cx();
+        let source = Rc::new(ExternalUnderlyingSourceController::new(source));
+        let global = GlobalScope::current().expect("No current global object.");
+        let cx = global.get_cx();
 
-            rooted!(in(*cx) let proto = UndefinedValue());
-            rooted!(in(*cx) let proto_obj = proto.to_object());
+        let stream = unsafe {
+            let mut traps = ReadableStreamUnderlyingSourceTraps {
+                requestData: Some(request_data),
+                writeIntoReadRequestBuffer: Some(write_into_read_request_buffer),
+                cancel: Some(cancel),
+                onClosed: Some(close),
+                onErrored: Some(error),
+                finalize: Some(finalize),
+            };
+            let js_wrapper = CreateReadableStreamUnderlyingSource(
+                &mut traps,
+                &*source as *const _ as *const c_void,
+            );
+
             rooted!(in(*cx)
                 let js_stream = NewReadableExternalSourceStreamObject(
                     *cx,
-                    source.create_js_wrapper(),
-                    proto_obj.handle().into_handle(),
+                    js_wrapper,
+                    // Prototype.
+                    HandleObject::null(),
                 )
             );
 
-            ReadableStream::from_js_with_source(cx, js_stream.get(), Some(source))
-        }
+            ReadableStream::from_js_with_source(cx, js_stream.get(), Some(source.clone()))
+        };
+
+        let task_source = global.dom_manipulation_task_source();
+        let canceller = global.task_canceller(TaskSourceName::DOMManipulation);
+        let trusted_stream = Trusted::new(&*stream);
+        source.set_up_finalize(trusted_stream, task_source, canceller);
+
+        stream
+    }
+
+    #[allow(unsafe_code)]
+    pub fn finalize(&self) {
+        // TODO: update SM.
+        // ReadableStreamReleaseCCObject(self.js_stream.get());
     }
 
     /// Get a pointer to the underlying JS object.
@@ -143,7 +178,7 @@ impl ReadableStream {
         self.external_underlying_source
             .as_ref()
             .expect("No external source to enqueue bytes.")
-            .enqueue_chunk(cx, stream_handle, bytes);
+            .enqueue_chunk(cx, stream_handle.clone(), bytes);
     }
 
     #[allow(unsafe_code)]
@@ -160,6 +195,19 @@ impl ReadableStream {
                 js_error.handle().into_handle(),
             );
         }
+    }
+
+    #[allow(unsafe_code)]
+    pub fn close_native(&self) {
+        let global = GlobalScope::current().expect("No current global object.");
+        let cx = global.get_cx();
+
+        let handle = unsafe { self.js_stream.handle() };
+
+        self.external_underlying_source
+            .as_ref()
+            .expect("No external source to close.")
+            .close(cx, handle);
     }
 
     /// Acquires a reader and locks the stream,
@@ -272,7 +320,7 @@ unsafe extern "C" fn request_data(
     stream: HandleObject,
     desired_size: usize,
 ) {
-    let source = &*(source as *const ExternalUnderlyingSourceWrapper);
+    let source = &*(source as *const ExternalUnderlyingSourceController);
     source.pull(SafeJSContext::from_ptr(cx), stream, desired_size);
 }
 
@@ -285,7 +333,7 @@ unsafe extern "C" fn write_into_read_request_buffer(
     length: usize,
     bytes_written: *mut usize,
 ) {
-    let source = &*(source as *const ExternalUnderlyingSourceWrapper);
+    let source = &*(source as *const ExternalUnderlyingSourceController);
     source.write_into_buffer(
         SafeJSContext::from_ptr(cx),
         stream,
@@ -295,7 +343,34 @@ unsafe extern "C" fn write_into_read_request_buffer(
     );
 }
 
-#[derive(Clone, JSTraceable, MallocSizeOf)]
+#[allow(unsafe_code)]
+unsafe extern "C" fn cancel(
+    _source: *const c_void,
+    _cx: *mut JSContext,
+    _stream: HandleObject,
+    _reason: HandleValue,
+) -> *mut JSVal {
+    ptr::null_mut()
+}
+
+#[allow(unsafe_code)]
+unsafe extern "C" fn close(_source: *const c_void, _cx: *mut JSContext, _stream: HandleObject) {}
+
+#[allow(unsafe_code)]
+unsafe extern "C" fn error(
+    _source: *const c_void,
+    _cx: *mut JSContext,
+    _stream: HandleObject,
+    _reason: HandleValue,
+) {
+}
+
+#[allow(unsafe_code)]
+unsafe extern "C" fn finalize(source: *const c_void) {
+    let source = &*(source as *const ExternalUnderlyingSourceController);
+    source.finalize();
+}
+
 pub enum ExternalUnderlyingSource {
     /// Facilitate partial integration with sources
     /// that are currently read into memory.
@@ -304,106 +379,148 @@ pub enum ExternalUnderlyingSource {
     Blob(usize),
 }
 
-#[derive(JSTraceable, MallocSizeOf)]
-struct ExternalUnderlyingSourceWrapper {
-    source: DomRefCell<ExternalUnderlyingSource>,
-    buffer: DomRefCell<Vec<u8>>,
+pub struct StreamFinalizer {
+    stream: Trusted<ReadableStream>,
+    task_source: DOMManipulationTaskSource,
+    canceller: TaskCanceller,
 }
 
-impl ExternalUnderlyingSourceWrapper {
-    fn new(source: ExternalUnderlyingSource) -> ExternalUnderlyingSourceWrapper {
+impl StreamFinalizer {
+    fn finalize(self) {
+        let trusted_stream = self.stream;
+        let canceller = self.canceller;
+        let _ = self.task_source.queue_with_canceller(
+            task!(reject_promise: move || {
+                let stream = trusted_stream.root();
+                stream.finalize();
+            }),
+            &canceller,
+        );
+    }
+}
+
+#[derive(JSTraceable, MallocSizeOf)]
+struct ExternalUnderlyingSourceController {
+    buffer: DomRefCell<Vec<u8>>,
+    #[ignore_malloc_size_of = "StreamFinalizer"]
+    finalizer: Mutex<Option<StreamFinalizer>>,
+}
+
+impl ExternalUnderlyingSourceController {
+    fn new(source: ExternalUnderlyingSource) -> ExternalUnderlyingSourceController {
         let buffer = match source {
             ExternalUnderlyingSource::Blob(size) => Vec::with_capacity(size),
-            ExternalUnderlyingSource::Memory(_) => Vec::with_capacity(0),
+            ExternalUnderlyingSource::Memory(bytes) => bytes,
         };
-        ExternalUnderlyingSourceWrapper {
-            source: DomRefCell::new(source),
+        ExternalUnderlyingSourceController {
             buffer: DomRefCell::new(buffer),
+            finalizer: Mutex::new(None),
         }
     }
 
-    #[allow(unsafe_code)]
-    fn create_js_wrapper(&mut self) -> *mut ReadableStreamUnderlyingSource {
-        let mut traps = ReadableStreamUnderlyingSourceTraps {
-            requestData: Some(request_data),
-            writeIntoReadRequestBuffer: Some(write_into_read_request_buffer),
-            cancel: None,
-            onClosed: None,
-            onErrored: None,
-            finalize: None,
-        };
-        unsafe { CreateReadableStreamUnderlyingSource(&mut traps, self as *mut _ as *mut c_void) }
+    fn set_up_finalize(
+        &self,
+        stream: Trusted<ReadableStream>,
+        task_source: DOMManipulationTaskSource,
+        canceller: TaskCanceller,
+    ) {
+        *self.finalizer.lock().unwrap() = Some(StreamFinalizer {
+            stream,
+            task_source,
+            canceller,
+        });
+    }
+
+    fn finalize(&self) {
+        self.finalizer
+            .lock()
+            .unwrap()
+            .take()
+            .expect("No StreamFinalizer.")
+            .finalize();
     }
 
     #[allow(unsafe_code)]
-    fn signal_available_bytes(&self, cx: SafeJSContext, stream: HandleObject) {
-        let available = match &*self.source.borrow() {
-            ExternalUnderlyingSource::Memory(vec) => vec.len(),
-            ExternalUnderlyingSource::Blob(_) => self.buffer.borrow().len(),
-        };
-        if available > 0 {
-            // We have bytes available in memory, or from a blob push source.
-            unsafe {
-                ReadableStreamUpdateDataAvailableFromSource(*cx, stream, available as u32);
+    fn signal_available_bytes(&self, cx: SafeJSContext, stream: HandleObject, available: usize) {
+        // We have bytes available in memory, or from a blob push source.
+        unsafe {
+            ReadableStreamUpdateDataAvailableFromSource(*cx, stream, available as u32);
+        }
+    }
+
+    /// Close a currently readable js stream.
+    #[allow(unsafe_code)]
+    fn maybe_close_js_stream(&self, cx: SafeJSContext, stream: HandleObject) {
+        unsafe {
+            let mut readable = false;
+            if !ReadableStreamIsReadable(*cx, stream, &mut readable) {
+                return;
+            }
+            if readable {
+                ReadableStreamClose(*cx, stream);
             }
         }
     }
 
-    fn enqueue_chunk(&self, cx: SafeJSContext, stream: HandleObject, mut chunk: Vec<u8>) {
-        match &*self.source.borrow() {
-            ExternalUnderlyingSource::Blob(_) => {
-                self.buffer.borrow_mut().append(&mut chunk);
-            },
-            ExternalUnderlyingSource::Memory(_) => {
-                panic!("Memory source should not enqueue chunks.");
-            },
-        }
-        self.signal_available_bytes(cx, stream);
+    fn close(&self, cx: SafeJSContext, stream: HandleObject) {
+        self.maybe_close_js_stream(cx, stream);
     }
 
+    fn enqueue_chunk(&self, cx: SafeJSContext, stream: HandleObject, mut chunk: Vec<u8>) {
+        println!("Enqueing chunk.");
+        let available = {
+            let mut buffer = self.buffer.borrow_mut();
+            buffer.append(&mut chunk);
+            buffer.len()
+        };
+        self.signal_available_bytes(cx, stream, available);
+    }
+
+    #[allow(unsafe_code)]
     fn pull(&self, cx: SafeJSContext, stream: HandleObject, _desired_size: usize) {
         // Note: for pull sources,
         // this would be the time to ask for a chunk.
-        self.signal_available_bytes(cx, stream);
+
+        let available = {
+            let buffer = self.buffer.borrow();
+            buffer.len()
+        };
+
+        self.signal_available_bytes(cx, stream, available);
+    }
+
+    fn get_chunk_with_length(&self, length: usize) -> Vec<u8> {
+        let mut buffer = self.buffer.borrow_mut();
+        let buffer_len = buffer.len();
+        assert!(buffer_len >= length as usize);
+        buffer.split_off(buffer_len - length)
     }
 
     #[allow(unsafe_code)]
     fn write_into_buffer(
         &self,
-        _cx: SafeJSContext,
-        _stream: HandleObject,
+        cx: SafeJSContext,
+        stream: HandleObject,
         buffer: *mut c_void,
         length: usize,
         bytes_written: *mut usize,
     ) {
-        let source = match &mut *self.source.borrow_mut() {
-            ExternalUnderlyingSource::Memory(vec) => {
-                assert!(vec.len() >= length as usize);
-                vec.split_off(length)
-            },
-            ExternalUnderlyingSource::Blob(_) => {
-                let mut buffer = self.buffer.borrow_mut();
-                assert!(buffer.len() >= length as usize);
-                buffer.split_off(length)
-            },
-        };
+        let chunk = self.get_chunk_with_length(length);
+
         unsafe {
-            ptr::copy_nonoverlapping(
-                source.as_ptr() as *const _ as *const c_void,
-                buffer,
-                source.len(),
-            );
-            *bytes_written = length;
+            *bytes_written = chunk.len();
+            ptr::copy_nonoverlapping(chunk.as_ptr(), buffer as *mut u8, chunk.len());
         };
+
+        if unsafe { *bytes_written == 0 } {
+            self.maybe_close_js_stream(cx, stream);
+        }
     }
 
     /// Hack to enable partial integration
     /// for bodies that have already been read into memory.
     fn clone_body(&self) -> Option<Vec<u8>> {
-        match &*self.source.borrow() {
-            ExternalUnderlyingSource::Memory(vec) => Some(vec.clone()),
-            ExternalUnderlyingSource::Blob(_) => None,
-        }
+        Some((*self.buffer.borrow()).clone())
     }
 }
 

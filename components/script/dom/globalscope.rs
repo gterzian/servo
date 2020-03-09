@@ -428,7 +428,7 @@ impl MessageListener {
     }
 }
 
-/// Callback used for streams as part of FileListener.
+/// Callback used to enqueue file chunks to streams as part of FileListener.
 fn stream_handle_incoming(stream: DomRoot<ReadableStream>, bytes: Result<Vec<u8>, Error>) {
     match bytes {
         Ok(b) => {
@@ -438,6 +438,11 @@ fn stream_handle_incoming(stream: DomRoot<ReadableStream>, bytes: Result<Vec<u8>
             stream.error_native(e);
         },
     }
+}
+
+/// Callback used to close streams as part of FileListener.
+fn stream_handle_eof(stream: DomRoot<ReadableStream>) {
+    stream.close_native();
 }
 
 impl FileListener {
@@ -493,8 +498,8 @@ impl FileListener {
                 ),
             },
             Ok(ReadFileProgress::EOF) => match self.state.take() {
-                Some(FileListenerState::Receiving(bytes, callback, target)) => {
-                    if let FileListenerTarget::Promise(trusted_promise) = target {
+                Some(FileListenerState::Receiving(bytes, callback, target)) => match target {
+                    FileListenerTarget::Promise(trusted_promise) => {
                         let callback = match callback {
                             FileListenerCallback::Promise(callback) => callback,
                             _ => panic!("Expected promise callback."),
@@ -508,7 +513,20 @@ impl FileListener {
                         let _ = self
                             .task_source
                             .queue_with_canceller(task, &self.task_canceller);
-                    }
+                    },
+                    FileListenerTarget::Stream(trusted_stream) => {
+                        let trusted = trusted_stream.clone();
+                        let callback = Box::new(stream_handle_eof);
+
+                        let task = task!(enqueue_stream_chunk: move || {
+                            let stream = trusted.root();
+                            callback(stream);
+                        });
+
+                        let _ = self
+                            .task_source
+                            .queue_with_canceller(task, &self.task_canceller);
+                    },
                 },
                 _ => {
                     panic!("Unexpected FileListenerState when receiving ReadFileProgress::EOF msg.")
@@ -1485,10 +1503,14 @@ impl GlobalScope {
     pub fn get_blob_stream(&self, blob_id: &BlobId) -> DomRoot<ReadableStream> {
         let (file_id, size) = match self.get_blob_bytes_or_file_id(blob_id) {
             (Some(bytes), None) => {
+                println!("New blob stream.");
                 let stream = ReadableStream::new_with_external_underlying_source(
                     ExternalUnderlyingSource::Blob(bytes.len()),
                 );
+                println!("Queuing bytes to blob stream.");
                 stream.enqueue_native(bytes);
+                stream.close_native();
+                println!("Returning blob stream.");
                 return stream;
             },
             (None, Some((id, size))) => (id, size),
