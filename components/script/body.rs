@@ -221,22 +221,23 @@ impl ExtractedBody {
 
 /// <https://fetch.spec.whatwg.org/#concept-bodyinit-extract>
 pub trait Extractable {
-    fn extract(&self) -> ExtractedBody;
+    fn extract(&self, global: &GlobalScope) -> ExtractedBody;
 }
 
 impl Extractable for BodyInit {
     // https://fetch.spec.whatwg.org/#concept-bodyinit-extract
-    fn extract(&self) -> ExtractedBody {
+    fn extract(&self, global: &GlobalScope) -> ExtractedBody {
         match self {
-            BodyInit::String(ref s) => s.extract(),
-            BodyInit::URLSearchParams(ref usp) => usp.extract(),
-            BodyInit::Blob(ref b) => b.extract(),
-            BodyInit::FormData(ref formdata) => formdata.extract(),
+            BodyInit::String(ref s) => s.extract(global),
+            BodyInit::URLSearchParams(ref usp) => usp.extract(global),
+            BodyInit::Blob(ref b) => b.extract(global),
+            BodyInit::FormData(ref formdata) => formdata.extract(global),
             BodyInit::ArrayBuffer(ref typedarray) => {
                 let bytes = typedarray.to_vec();
                 let total_bytes = bytes.len();
                 ExtractedBody {
                     stream: ReadableStream::new_with_external_underlying_source(
+                        global,
                         ExternalUnderlyingSource::Memory(bytes),
                     ),
                     total_bytes,
@@ -249,6 +250,7 @@ impl Extractable for BodyInit {
                 let total_bytes = bytes.len();
                 ExtractedBody {
                     stream: ReadableStream::new_with_external_underlying_source(
+                        global,
                         ExternalUnderlyingSource::Memory(bytes),
                     ),
                     total_bytes,
@@ -267,11 +269,12 @@ impl Extractable for BodyInit {
 }
 
 impl Extractable for Vec<u8> {
-    fn extract(&self) -> ExtractedBody {
+    fn extract(&self, global: &GlobalScope) -> ExtractedBody {
         let bytes = self.clone();
         let total_bytes = self.len();
         ExtractedBody {
             stream: ReadableStream::new_with_external_underlying_source(
+                global,
                 ExternalUnderlyingSource::Memory(bytes),
             ),
             total_bytes,
@@ -283,7 +286,7 @@ impl Extractable for Vec<u8> {
 }
 
 impl Extractable for Blob {
-    fn extract(&self) -> ExtractedBody {
+    fn extract(&self, _global: &GlobalScope) -> ExtractedBody {
         let content_type = if self.Type().as_ref().is_empty() {
             None
         } else {
@@ -300,12 +303,13 @@ impl Extractable for Blob {
 }
 
 impl Extractable for DOMString {
-    fn extract(&self) -> ExtractedBody {
+    fn extract(&self, global: &GlobalScope) -> ExtractedBody {
         let bytes = self.as_bytes().to_owned();
         let total_bytes = bytes.len();
         let content_type = Some(DOMString::from("text/plain;charset=UTF-8"));
         ExtractedBody {
             stream: ReadableStream::new_with_external_underlying_source(
+                global,
                 ExternalUnderlyingSource::Memory(bytes),
             ),
             total_bytes,
@@ -316,7 +320,7 @@ impl Extractable for DOMString {
 }
 
 impl Extractable for FormData {
-    fn extract(&self) -> ExtractedBody {
+    fn extract(&self, global: &GlobalScope) -> ExtractedBody {
         let boundary = generate_boundary();
         let bytes = encode_multipart_form_data(&mut self.datums(), boundary.clone(), UTF_8);
         let total_bytes = bytes.len();
@@ -326,6 +330,7 @@ impl Extractable for FormData {
         )));
         ExtractedBody {
             stream: ReadableStream::new_with_external_underlying_source(
+                global,
                 ExternalUnderlyingSource::Memory(bytes),
             ),
             total_bytes,
@@ -336,7 +341,7 @@ impl Extractable for FormData {
 }
 
 impl Extractable for URLSearchParams {
-    fn extract(&self) -> ExtractedBody {
+    fn extract(&self, global: &GlobalScope) -> ExtractedBody {
         let bytes = self.serialize_utf8().into_bytes();
         let total_bytes = bytes.len();
         let content_type = Some(DOMString::from(
@@ -344,6 +349,7 @@ impl Extractable for URLSearchParams {
         ));
         ExtractedBody {
             stream: ReadableStream::new_with_external_underlying_source(
+                global,
                 ExternalUnderlyingSource::Memory(bytes),
             ),
             total_bytes,

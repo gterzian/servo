@@ -421,7 +421,7 @@ impl Request {
             // Step 36.2 TODO "If init["keepalive"] exists and is true..."
 
             // Step 36.3
-            let mut extracted_body = init_body.extract();
+            let mut extracted_body = init_body.extract(global);
 
             // Step 36.4
             if let Some(contents) = extracted_body.content_type.take() {

@@ -136,7 +136,7 @@ impl Response {
                 total_bytes: _,
                 content_type,
                 source: _,
-            } = body.extract();
+            } = body.extract(global);
 
             let body = stream
                 .clone_body()
@@ -251,6 +251,7 @@ impl BodyOperations for Response {
         match body {
             NetTraitsResponseBody::Done(bytes) => {
                 Some(ReadableStream::new_with_external_underlying_source(
+                    &self.global(),
                     ExternalUnderlyingSource::Memory(bytes),
                 ))
             },

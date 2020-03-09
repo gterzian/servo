@@ -109,10 +109,11 @@ impl ReadableStream {
     /// Build a stream backed by a Rust underlying source.
     #[allow(unsafe_code)]
     pub fn new_with_external_underlying_source(
+        global: &GlobalScope,
         source: ExternalUnderlyingSource,
     ) -> DomRoot<ReadableStream> {
         let source = Rc::new(ExternalUnderlyingSourceController::new(source));
-        let global = GlobalScope::current().expect("No current global object.");
+
         let cx = global.get_cx();
 
         let stream = unsafe {
@@ -467,7 +468,6 @@ impl ExternalUnderlyingSourceController {
     }
 
     fn enqueue_chunk(&self, cx: SafeJSContext, stream: HandleObject, mut chunk: Vec<u8>) {
-        println!("Enqueing chunk.");
         let available = {
             let mut buffer = self.buffer.borrow_mut();
             buffer.append(&mut chunk);

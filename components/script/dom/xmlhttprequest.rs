@@ -577,6 +577,7 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
                 let total_bytes = data.len();
                 Some(ExtractedBody {
                     stream: ReadableStream::new_with_external_underlying_source(
+                        &self.global(),
                         ExternalUnderlyingSource::Memory(data),
                     ),
                     total_bytes,
@@ -584,15 +585,20 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
                     source: BodySource::Null,
                 })
             },
-            Some(DocumentOrBodyInit::Blob(ref b)) => Some(b.extract()),
-            Some(DocumentOrBodyInit::FormData(ref formdata)) => Some(formdata.extract()),
-            Some(DocumentOrBodyInit::String(ref str)) => Some(str.extract()),
-            Some(DocumentOrBodyInit::URLSearchParams(ref urlsp)) => Some(urlsp.extract()),
+            Some(DocumentOrBodyInit::Blob(ref b)) => Some(b.extract(&self.global())),
+            Some(DocumentOrBodyInit::FormData(ref formdata)) => {
+                Some(formdata.extract(&self.global()))
+            },
+            Some(DocumentOrBodyInit::String(ref str)) => Some(str.extract(&self.global())),
+            Some(DocumentOrBodyInit::URLSearchParams(ref urlsp)) => {
+                Some(urlsp.extract(&self.global()))
+            },
             Some(DocumentOrBodyInit::ArrayBuffer(ref typedarray)) => {
                 let bytes = typedarray.to_vec();
                 let total_bytes = bytes.len();
                 Some(ExtractedBody {
                     stream: ReadableStream::new_with_external_underlying_source(
+                        &self.global(),
                         ExternalUnderlyingSource::Memory(bytes),
                     ),
                     total_bytes,
@@ -605,6 +611,7 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
                 let total_bytes = bytes.len();
                 Some(ExtractedBody {
                     stream: ReadableStream::new_with_external_underlying_source(
+                        &self.global(),
                         ExternalUnderlyingSource::Memory(bytes),
                     ),
                     total_bytes,
