@@ -147,7 +147,7 @@ pub fn Fetch(
     // Step 2
     let request = match Request::Constructor(global, input, init) {
         Err(e) => {
-            response.error_stream();
+            response.error_stream(e.clone());
             promise.reject_error(e);
             return promise;
         },
@@ -222,7 +222,7 @@ impl FetchResponseListener for FetchContext {
                 self.fetch_promise = Some(TrustedPromise::new(promise));
                 let response = self.response_object.root();
                 response.set_type(DOMResponseType::Error);
-                response.error_stream();
+                response.error_stream(Error::Type("Network error occurred".to_string()));
                 return;
             },
             // Step 4.2

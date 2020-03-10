@@ -224,6 +224,10 @@ impl Response {
         Ok(r)
     }
 
+    pub fn error_stream(&self, error: Error) {
+        self.body_stream.borrow().error_native(error);
+    }
+
     // https://fetch.spec.whatwg.org/#concept-body-locked
     fn locked(&self) -> bool {
         // TODO: ReadableStream is unimplemented. Just return false
@@ -366,7 +370,12 @@ impl ResponseMethods for Response {
 
     // https://fetch.spec.whatwg.org/#dom-body-bodyused
     fn BodyUsed(&self) -> bool {
-        self.body_used.get()
+        if self.body_used.get() {
+            return true;
+        }
+
+        let body_stream = self.body_stream.borrow();
+        body_stream.is_disturbed()
     }
 
     // https://fetch.spec.whatwg.org/#dom-body-text

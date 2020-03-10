@@ -1509,7 +1509,7 @@ impl GlobalScope {
                     ExternalUnderlyingSource::Blob(bytes.len()),
                 );
                 // If we have all the bytes in memory, queue them and close the stream.
-                stream.enqueue_native(bytes);
+                stream.enqueue_native(self, bytes);
                 stream.close_native();
                 return stream;
             },

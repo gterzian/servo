@@ -171,7 +171,7 @@ impl ReadableStream {
 
     #[allow(unsafe_code)]
     pub fn enqueue_native(&self, global: &GlobalScope, bytes: Vec<u8>) {
-        global.get_cx();
+        let cx = global.get_cx();
 
         let stream_handle = unsafe { self.js_stream.handle() };
 
@@ -485,6 +485,7 @@ impl ExternalUnderlyingSourceController {
     }
 
     fn enqueue_chunk(&self, cx: SafeJSContext, stream: HandleObject, mut chunk: Vec<u8>) {
+        println!("Enqueuing chunks: {:?}", chunk.len());
         let available = {
             let mut buffer = self.buffer.borrow_mut();
             buffer.append(&mut chunk);
@@ -515,7 +516,9 @@ impl ExternalUnderlyingSourceController {
             buffer.len()
         };
 
-        self.signal_available_bytes(cx, stream, available);
+        if available > 0 {
+            self.signal_available_bytes(cx, stream, available);
+        }
     }
 
     fn get_chunk_with_length(&self, length: usize) -> Vec<u8> {
@@ -539,12 +542,7 @@ impl ExternalUnderlyingSourceController {
         unsafe {
             *bytes_written = chunk.len();
             ptr::copy_nonoverlapping(chunk.as_ptr(), buffer as *mut u8, chunk.len());
-
-            if *bytes_written == 0 {
-                println!("Zero bytes written, maybe closing stream.");
-                self.maybe_close_js_stream(cx, stream);
-            }
-        };
+        }
     }
 
     /// Hack to enable partial integration
