@@ -246,7 +246,10 @@ impl ReadableStream {
             panic!("ReadableStream::read_a_chunk called before start_reading.");
         }
 
-        let cx = self.global().get_cx();
+        println!("Reading a chunk from a stream");
+
+        let global = self.global();
+        let cx = global.get_cx();
 
         unsafe {
             rooted!(in(*cx) let promise_obj = ReadableStreamDefaultReaderRead(
@@ -403,6 +406,7 @@ impl StreamFinalizer {
 #[derive(JSTraceable, MallocSizeOf)]
 struct ExternalUnderlyingSourceController {
     buffer: DomRefCell<Vec<u8>>,
+    closed: DomRefCell<bool>,
     #[ignore_malloc_size_of = "StreamFinalizer"]
     finalizer: Mutex<Option<StreamFinalizer>>,
 }
@@ -415,6 +419,7 @@ impl ExternalUnderlyingSourceController {
         };
         ExternalUnderlyingSourceController {
             buffer: DomRefCell::new(buffer),
+            closed: DomRefCell::new(false),
             finalizer: Mutex::new(None),
         }
     }
@@ -444,6 +449,7 @@ impl ExternalUnderlyingSourceController {
     #[allow(unsafe_code)]
     fn signal_available_bytes(&self, cx: SafeJSContext, stream: HandleObject, available: usize) {
         // We have bytes available in memory, or from a blob push source.
+        println!("Signal available bytes: {:?}", available);
         unsafe {
             ReadableStreamUpdateDataAvailableFromSource(*cx, stream, available as u32);
         }
@@ -452,18 +458,22 @@ impl ExternalUnderlyingSourceController {
     /// Close a currently readable js stream.
     #[allow(unsafe_code)]
     fn maybe_close_js_stream(&self, cx: SafeJSContext, stream: HandleObject) {
+        println!("Maybe closing stream.");
         unsafe {
             let mut readable = false;
             if !ReadableStreamIsReadable(*cx, stream, &mut readable) {
                 return;
             }
             if readable {
+                println!("Indeed closing stream.");
                 ReadableStreamClose(*cx, stream);
             }
         }
     }
 
     fn close(&self, cx: SafeJSContext, stream: HandleObject) {
+        println!("Native close called");
+        *self.closed.borrow_mut() = true;
         self.maybe_close_js_stream(cx, stream);
     }
 
@@ -480,6 +490,18 @@ impl ExternalUnderlyingSourceController {
     fn pull(&self, cx: SafeJSContext, stream: HandleObject, _desired_size: usize) {
         // Note: for pull sources,
         // this would be the time to ask for a chunk.
+
+        println!(
+            "Pull steps ExternalUnderlyingSourceController with buffer: {:?} closed: {:?}",
+            self.buffer.borrow().len(),
+            *self.closed.borrow()
+        );
+
+        let closed = { *self.closed.borrow() };
+
+        if closed {
+            return self.maybe_close_js_stream(cx, stream);
+        }
 
         let available = {
             let buffer = self.buffer.borrow();
@@ -510,11 +532,12 @@ impl ExternalUnderlyingSourceController {
         unsafe {
             *bytes_written = chunk.len();
             ptr::copy_nonoverlapping(chunk.as_ptr(), buffer as *mut u8, chunk.len());
-        };
 
-        if unsafe { *bytes_written == 0 } {
-            self.maybe_close_js_stream(cx, stream);
-        }
+            if *bytes_written == 0 {
+                println!("Zero bytes written, maybe closing stream.");
+                self.maybe_close_js_stream(cx, stream);
+            }
+        };
     }
 
     /// Hack to enable partial integration

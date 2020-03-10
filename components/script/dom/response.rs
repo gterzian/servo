@@ -250,10 +250,12 @@ impl BodyOperations for Response {
         let body = mem::replace(&mut *self.body.borrow_mut(), NetTraitsResponseBody::Empty);
         match body {
             NetTraitsResponseBody::Done(bytes) => {
-                Some(ReadableStream::new_with_external_underlying_source(
+                let stream = ReadableStream::new_with_external_underlying_source(
                     &self.global(),
                     ExternalUnderlyingSource::Memory(bytes),
-                ))
+                );
+                stream.close_native();
+                Some(stream)
             },
             body => {
                 mem::replace(&mut *self.body.borrow_mut(), body);

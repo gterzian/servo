@@ -10,6 +10,7 @@ use crate::dom::bindings::error::{Error, Fallible};
 use crate::dom::bindings::refcounted::Trusted;
 use crate::dom::bindings::reflector::DomObject;
 use crate::dom::bindings::root::DomRoot;
+use crate::dom::bindings::settings_stack::AutoIncumbentScript;
 use crate::dom::bindings::str::{DOMString, USVString};
 use crate::dom::bindings::trace::RootedTraceableBox;
 use crate::dom::blob::{normalize_type_string, Blob};
@@ -85,8 +86,12 @@ impl TransmitBodyConnectHandler {
         let _ = self.task_source.queue_with_canceller(
             task!(setup_native_body_promise_handler: move || {
                 let rooted_stream = stream.root();
-                rooted_stream.start_reading();
+                let global = global.root();
 
+                let in_realm_proof = AlreadyInRealm::assert(&global);
+                let _ais = AutoIncumbentScript::new(&global);
+
+                rooted_stream.start_reading();
                 let promise = rooted_stream.read_a_chunk();
 
                 let promise_handler = Box::new(TransmitBodyPromiseHandler {
@@ -96,7 +101,7 @@ impl TransmitBodyConnectHandler {
 
                 let rejection_handler = Box::new(TransmitBodyPromiseRejectionHandler {stream: rooted_stream});
 
-                let handler = PromiseNativeHandler::new(&global.root(), Some(promise_handler), Some(rejection_handler));
+                let handler = PromiseNativeHandler::new(&global, Some(promise_handler), Some(rejection_handler));
                 promise.append_native_handler(&handler);
             }),
             &self.canceller,
@@ -235,11 +240,13 @@ impl Extractable for BodyInit {
             BodyInit::ArrayBuffer(ref typedarray) => {
                 let bytes = typedarray.to_vec();
                 let total_bytes = bytes.len();
+                let stream = ReadableStream::new_with_external_underlying_source(
+                    global,
+                    ExternalUnderlyingSource::Memory(bytes),
+                );
+                stream.close_native();
                 ExtractedBody {
-                    stream: ReadableStream::new_with_external_underlying_source(
-                        global,
-                        ExternalUnderlyingSource::Memory(bytes),
-                    ),
+                    stream,
                     total_bytes,
                     content_type: None,
                     source: BodySource::BufferSource,
@@ -248,11 +255,13 @@ impl Extractable for BodyInit {
             BodyInit::ArrayBufferView(ref typedarray) => {
                 let bytes = typedarray.to_vec();
                 let total_bytes = bytes.len();
+                let stream = ReadableStream::new_with_external_underlying_source(
+                    global,
+                    ExternalUnderlyingSource::Memory(bytes),
+                );
+                stream.close_native();
                 ExtractedBody {
-                    stream: ReadableStream::new_with_external_underlying_source(
-                        global,
-                        ExternalUnderlyingSource::Memory(bytes),
-                    ),
+                    stream,
                     total_bytes,
                     content_type: None,
                     source: BodySource::BufferSource,
@@ -272,11 +281,13 @@ impl Extractable for Vec<u8> {
     fn extract(&self, global: &GlobalScope) -> ExtractedBody {
         let bytes = self.clone();
         let total_bytes = self.len();
+        let stream = ReadableStream::new_with_external_underlying_source(
+            global,
+            ExternalUnderlyingSource::Memory(bytes),
+        );
+        stream.close_native();
         ExtractedBody {
-            stream: ReadableStream::new_with_external_underlying_source(
-                global,
-                ExternalUnderlyingSource::Memory(bytes),
-            ),
+            stream,
             total_bytes,
             content_type: None,
             // A vec is used only in `submit_entity_body`.
@@ -307,11 +318,13 @@ impl Extractable for DOMString {
         let bytes = self.as_bytes().to_owned();
         let total_bytes = bytes.len();
         let content_type = Some(DOMString::from("text/plain;charset=UTF-8"));
+        let stream = ReadableStream::new_with_external_underlying_source(
+            global,
+            ExternalUnderlyingSource::Memory(bytes),
+        );
+        stream.close_native();
         ExtractedBody {
-            stream: ReadableStream::new_with_external_underlying_source(
-                global,
-                ExternalUnderlyingSource::Memory(bytes),
-            ),
+            stream,
             total_bytes,
             content_type,
             source: BodySource::USVString,
@@ -328,11 +341,13 @@ impl Extractable for FormData {
             "multipart/form-data;boundary={}",
             boundary
         )));
+        let stream = ReadableStream::new_with_external_underlying_source(
+            global,
+            ExternalUnderlyingSource::Memory(bytes),
+        );
+        stream.close_native();
         ExtractedBody {
-            stream: ReadableStream::new_with_external_underlying_source(
-                global,
-                ExternalUnderlyingSource::Memory(bytes),
-            ),
+            stream,
             total_bytes,
             content_type,
             source: BodySource::FormData,
@@ -347,11 +362,13 @@ impl Extractable for URLSearchParams {
         let content_type = Some(DOMString::from(
             "application/x-www-form-urlencoded;charset=UTF-8",
         ));
+        let stream = ReadableStream::new_with_external_underlying_source(
+            global,
+            ExternalUnderlyingSource::Memory(bytes),
+        );
+        stream.close_native();
         ExtractedBody {
-            stream: ReadableStream::new_with_external_underlying_source(
-                global,
-                ExternalUnderlyingSource::Memory(bytes),
-            ),
+            stream,
             total_bytes,
             content_type,
             source: BodySource::URLSearchParams,
@@ -457,7 +474,12 @@ impl Callback for ConsumeBodyPromiseHandler {
 
             bytes.extend_from_slice(&*chunk);
 
+            let in_realm_proof = AlreadyInRealm::assert_for_cx(cx);
+            let global = GlobalScope::from_safe_context(cx, InRealm::Already(&in_realm_proof));
+            let _ais = AutoIncumbentScript::new(&global);
+
             // Read another chunk.
+            println!("Reading another chunk as part of ConsumeBodyPromiseHandler");
             let read_promise = self.stream.read_a_chunk();
 
             let promise_handler = Box::new(ConsumeBodyPromiseHandler {
@@ -472,9 +494,6 @@ impl Callback for ConsumeBodyPromiseHandler {
                 result_promise: self.result_promise.clone(),
             });
 
-            let in_realm_proof = AlreadyInRealm::assert_for_cx(cx);
-            let global = GlobalScope::from_safe_context(cx, InRealm::Already(&in_realm_proof));
-
             let handler =
                 PromiseNativeHandler::new(&global, Some(promise_handler), Some(rejection_handler));
             read_promise.append_native_handler(&handler);
@@ -485,7 +504,9 @@ impl Callback for ConsumeBodyPromiseHandler {
 // https://fetch.spec.whatwg.org/#concept-body-consume-body
 #[allow(unrooted_must_root)]
 pub fn consume_body<T: BodyOperations + DomObject>(object: &T, body_type: BodyType) -> Rc<Promise> {
-    let in_realm_proof = AlreadyInRealm::assert(&object.global());
+    let global = object.global();
+    let in_realm_proof = AlreadyInRealm::assert(&global);
+    let _ais = AutoIncumbentScript::new(&global);
     let promise =
         Promise::new_in_current_realm(&object.global(), InRealm::Already(&in_realm_proof));
 
@@ -511,6 +532,10 @@ pub fn consume_body_with_promise<T: BodyOperations + DomObject>(
     body_type: BodyType,
     promise: Rc<Promise>,
 ) {
+    let global = object.global();
+    let in_realm_proof = AlreadyInRealm::assert(&global);
+    let _ais = AutoIncumbentScript::new(&global);
+
     let stream = match object.get_stream() {
         Some(body) => body,
         None => return,
