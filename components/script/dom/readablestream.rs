@@ -170,9 +170,8 @@ impl ReadableStream {
     }
 
     #[allow(unsafe_code)]
-    pub fn enqueue_native(&self, bytes: Vec<u8>) {
-        let global = GlobalScope::current().expect("No current global object.");
-        let cx = global.get_cx();
+    pub fn enqueue_native(&self, global: &GlobalScope, bytes: Vec<u8>) {
+        global.get_cx();
 
         let stream_handle = unsafe { self.js_stream.handle() };
 
@@ -381,6 +380,8 @@ pub enum ExternalUnderlyingSource {
     Memory(Vec<u8>),
     /// A blob as underlying source, with a known total size.
     Blob(usize),
+    /// A fetch response as underlying source.
+    FetchResponse,
 }
 
 pub struct StreamFinalizer {
@@ -405,9 +406,14 @@ impl StreamFinalizer {
 
 #[derive(JSTraceable, MallocSizeOf)]
 struct ExternalUnderlyingSourceController {
+    /// Loosely matches the underlying queue,
+    /// <https://streams.spec.whatwg.org/#internal-queues>
     buffer: DomRefCell<Vec<u8>>,
+    /// Has the stream been closed by native code?
     closed: DomRefCell<bool>,
     #[ignore_malloc_size_of = "StreamFinalizer"]
+    /// An object that maybe be accessed from a background "clean-up" thread,
+    /// and which can be used to queue a task to finalize the stream.
     finalizer: Mutex<Option<StreamFinalizer>>,
 }
 
@@ -416,6 +422,7 @@ impl ExternalUnderlyingSourceController {
         let buffer = match source {
             ExternalUnderlyingSource::Blob(size) => Vec::with_capacity(size),
             ExternalUnderlyingSource::Memory(bytes) => bytes,
+            ExternalUnderlyingSource::FetchResponse => vec![],
         };
         ExternalUnderlyingSourceController {
             buffer: DomRefCell::new(buffer),

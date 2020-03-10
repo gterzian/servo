@@ -49,7 +49,7 @@ pub struct Request {
     request: DomRefCell<NetTraitsRequest>,
     body_used: Cell<bool>,
     #[ignore_malloc_size_of = "Rc"]
-    js_body: DomRefCell<Option<DomRoot<ReadableStream>>>,
+    body_stream: DomRefCell<Option<DomRoot<ReadableStream>>>,
     headers: MutNullableDom<Headers>,
     mime_type: DomRefCell<Vec<u8>>,
     #[ignore_malloc_size_of = "Rc"]
@@ -62,7 +62,7 @@ impl Request {
             reflector_: Reflector::new(),
             request: DomRefCell::new(net_request_from_global(global, url)),
             body_used: Cell::new(false),
-            js_body: DomRefCell::new(None),
+            body_stream: DomRefCell::new(None),
             headers: Default::default(),
             mime_type: DomRefCell::new("".to_string().into_bytes()),
             body_promise: DomRefCell::new(None),
@@ -449,8 +449,8 @@ impl Request {
                 }
             }
 
-            let (net_body, js_body) = extracted_body.into_net_request_body(global);
-            *r.js_body.borrow_mut() = Some(js_body);
+            let (net_body, body_stream) = extracted_body.into_net_request_body(global);
+            *r.body_stream.borrow_mut() = Some(body_stream);
             input_body = Some(net_body);
         }
 
@@ -647,8 +647,8 @@ impl RequestMethods for Request {
             return true;
         }
 
-        let js_body = self.js_body.borrow_mut().take();
-        js_body
+        let body_stream = self.body_stream.borrow_mut().take();
+        body_stream
             .and_then(|stream| Some(stream.is_disturbed()))
             .unwrap_or(false)
     }
@@ -705,15 +705,15 @@ impl BodyOperations for Request {
     }
 
     fn is_locked(&self) -> bool {
-        let js_body = self.js_body.borrow_mut().take();
-        js_body
+        let body_stream = self.body_stream.borrow_mut().take();
+        body_stream
             .and_then(|stream| Some(stream.is_locked()))
             .unwrap_or(false)
     }
 
     fn get_stream(&self) -> Option<DomRoot<ReadableStream>> {
-        let js_body = self.js_body.borrow_mut().take();
-        js_body.and_then(|stream| Some(DomRoot::from_ref(&*stream)))
+        let body_stream = self.body_stream.borrow_mut().take();
+        body_stream.and_then(|stream| Some(DomRoot::from_ref(&*stream)))
     }
 
     fn get_mime_type(&self) -> Vec<u8> {

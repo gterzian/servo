@@ -432,7 +432,8 @@ impl MessageListener {
 fn stream_handle_incoming(stream: DomRoot<ReadableStream>, bytes: Result<Vec<u8>, Error>) {
     match bytes {
         Ok(b) => {
-            stream.enqueue_native(b);
+            let global = stream.global();
+            stream.enqueue_native(&global, b);
         },
         Err(e) => {
             stream.error_native(e);
