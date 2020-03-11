@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-use crate::body::{consume_body, consume_body_with_promise, BodyOperations, BodyType};
+use crate::body::{consume_body, BodyOperations, BodyType};
 use crate::body::{Extractable, ExtractedBody};
 use crate::dom::bindings::cell::DomRefCell;
 use crate::dom::bindings::codegen::Bindings::HeadersBinding::{HeadersInit, HeadersMethods};
@@ -470,9 +470,6 @@ impl Response {
     #[allow(unrooted_must_root)]
     pub fn finish(&self) {
         self.body_stream.borrow().close_native();
-        if let Some((p, body_type)) = self.body_promise.borrow_mut().take() {
-            consume_body_with_promise(self, body_type, p.clone());
-        }
         if let Some(stream_consumer) = self.stream_consumer.borrow_mut().take() {
             stream_consumer.stream_end();
         }

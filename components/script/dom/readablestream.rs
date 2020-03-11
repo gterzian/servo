@@ -245,9 +245,9 @@ impl ReadableStream {
     /// must be called after `start_reading`,
     /// and before `stop_reading`.
     #[allow(unsafe_code)]
-    pub fn read_a_chunk(&self) -> Result<Rc<Promise>, ()> {
+    pub fn read_a_chunk(&self) -> Rc<Promise> {
         if !self.has_reader.get() {
-            return Err(());
+            panic!("Attempt to read stream chunk without having acquired a reader.");
         }
 
         println!("Reading a chunk from a stream");
@@ -260,7 +260,7 @@ impl ReadableStream {
                 *cx,
                 self.js_reader.handle(),
             ));
-            Ok(Promise::new_with_js_promise(promise_obj.handle(), cx))
+            Promise::new_with_js_promise(promise_obj.handle(), cx)
         }
     }
 
@@ -402,6 +402,7 @@ impl StreamFinalizer {
         let _ = self.task_source.queue_with_canceller(
             task!(reject_promise: move || {
                 let stream = trusted_stream.root();
+                let _ = enter_realm(&*stream.global());
                 stream.finalize();
             }),
             &canceller,

@@ -118,17 +118,17 @@ impl TransmitBodyConnectHandler {
                 let in_realm_proof = AlreadyInRealm::assert(&global);
                 let _ais = AutoIncumbentScript::new(&global);
 
-                if let Ok(promise) = rooted_stream.read_a_chunk() {
-                    let promise_handler = Box::new(TransmitBodyPromiseHandler {
-                        bytes_sender,
-                        stream: rooted_stream.clone(),
-                    });
+                let promise = rooted_stream.read_a_chunk();
 
-                    let rejection_handler = Box::new(TransmitBodyPromiseRejectionHandler {stream: rooted_stream});
+                let promise_handler = Box::new(TransmitBodyPromiseHandler {
+                    bytes_sender,
+                    stream: rooted_stream.clone(),
+                });
 
-                    let handler = PromiseNativeHandler::new(&global, Some(promise_handler), Some(rejection_handler));
-                    promise.append_native_handler(&handler);
-                }
+                let rejection_handler = Box::new(TransmitBodyPromiseRejectionHandler {stream: rooted_stream});
+
+                let handler = PromiseNativeHandler::new(&global, Some(promise_handler), Some(rejection_handler));
+                promise.append_native_handler(&handler);
             }),
             &self.canceller,
         );
@@ -421,6 +421,18 @@ pub enum FetchedData {
 }
 
 #[derive(Clone, JSTraceable, MallocSizeOf)]
+struct ConsumeBodyPromiseRejectionHandler {
+    #[ignore_malloc_size_of = "Rc are hard"]
+    result_promise: Rc<Promise>,
+}
+
+impl Callback for ConsumeBodyPromiseRejectionHandler {
+    fn callback(&self, cx: JSContext, v: HandleValue) {
+        self.result_promise.reject(cx, v);
+    }
+}
+
+#[derive(Clone, JSTraceable, MallocSizeOf)]
 /// The promise handler used to consume the body,
 /// <https://fetch.spec.whatwg.org/#concept-body-consume-body>
 struct ConsumeBodyPromiseHandler {
@@ -455,18 +467,6 @@ impl ConsumeBodyPromiseHandler {
             },
             Err(err) => self.result_promise.reject_error(err),
         }
-    }
-}
-
-#[derive(Clone, JSTraceable, MallocSizeOf)]
-struct ConsumeBodyPromiseRejectionHandler {
-    #[ignore_malloc_size_of = "Rc are hard"]
-    result_promise: Rc<Promise>,
-}
-
-impl Callback for ConsumeBodyPromiseRejectionHandler {
-    fn callback(&self, cx: JSContext, v: HandleValue) {
-        self.result_promise.reject(cx, v);
     }
 }
 
@@ -506,15 +506,7 @@ impl Callback for ConsumeBodyPromiseHandler {
 
             // Read another chunk.
             println!("Reading another chunk as part of ConsumeBodyPromiseHandler");
-            let read_promise = match self.stream.read_a_chunk() {
-                Err(_) => {
-                    println!("Not reading because locked or disturbed");
-                    return self.result_promise.reject_error(Error::Type(
-                        "The body's stream is disturbed or locked".to_string(),
-                    ));
-                },
-                Ok(read_promise) => read_promise,
-            };
+            let read_promise = self.stream.read_a_chunk();
 
             let promise_handler = Box::new(ConsumeBodyPromiseHandler {
                 result_promise: self.result_promise.clone(),
@@ -561,7 +553,7 @@ pub fn consume_body<T: BodyOperations + DomObject>(object: &T, body_type: BodyTy
 
 // https://fetch.spec.whatwg.org/#concept-body-consume-body
 #[allow(unrooted_must_root)]
-pub fn consume_body_with_promise<T: BodyOperations + DomObject>(
+fn consume_body_with_promise<T: BodyOperations + DomObject>(
     object: &T,
     body_type: BodyType,
     promise: Rc<Promise>,
@@ -581,9 +573,7 @@ pub fn consume_body_with_promise<T: BodyOperations + DomObject>(
         ));
     }
 
-    let read_promise = stream
-        .read_a_chunk()
-        .expect("Stream became locked or disturbed, while locked");
+    let read_promise = stream.read_a_chunk();
 
     let promise_handler = Box::new(ConsumeBodyPromiseHandler {
         result_promise: promise.clone(),
