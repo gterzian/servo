@@ -449,7 +449,7 @@ impl Request {
                 }
             }
 
-            let (net_body, body_stream) = extracted_body.into_net_request_body(global);
+            let (net_body, body_stream) = extracted_body.into_net_request_body();
             *r.body_stream.borrow_mut() = Some(body_stream);
             input_body = Some(net_body);
         }

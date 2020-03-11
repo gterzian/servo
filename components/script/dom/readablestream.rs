@@ -9,6 +9,7 @@ use crate::dom::bindings::error::Error;
 use crate::dom::bindings::refcounted::Trusted;
 use crate::dom::bindings::reflector::{reflect_dom_object, DomObject, Reflector};
 use crate::dom::bindings::root::DomRoot;
+use crate::dom::bindings::settings_stack::AutoIncumbentScript;
 use crate::dom::bindings::utils::get_dictionary_property;
 use crate::dom::globalscope::GlobalScope;
 use crate::dom::promise::Promise;
@@ -222,7 +223,9 @@ impl ReadableStream {
             return Err(());
         }
 
-        let cx = self.global().get_cx();
+        let global = self.global();
+        let ar = enter_realm(&*global);
+        let cx = global.get_cx();
 
         unsafe {
             rooted!(in(*cx) let stream = self.js_stream.get());
@@ -253,6 +256,10 @@ impl ReadableStream {
         println!("Reading a chunk from a stream");
 
         let global = self.global();
+        let ar = enter_realm(&*global);
+        AlreadyInRealm::assert(&*global);
+        let _ais = AutoIncumbentScript::new(&*global);
+
         let cx = global.get_cx();
 
         unsafe {
@@ -269,12 +276,14 @@ impl ReadableStream {
     #[allow(unsafe_code)]
     pub fn stop_reading(&self) {
         if self.has_reader.get() {
-            panic!("ReadableStream::stop_reading called on a readerless stream.");
+            println!("ReadableStream::stop_reading called on a readerless stream.");
         }
 
         self.has_reader.set(false);
 
-        let cx = self.global().get_cx();
+        let global = self.global();
+        let ar = enter_realm(&*global);
+        let cx = global.get_cx();
 
         unsafe {
             ReadableStreamReaderReleaseLock(*cx, self.js_reader.handle());

@@ -52,7 +52,6 @@ use url::form_urlencoded;
 
 struct TransmitBodyConnectHandler {
     stream: Trusted<ReadableStream>,
-    global: Trusted<GlobalScope>,
     task_source: NetworkingTaskSource,
     canceller: TaskCanceller,
     bytes_sender: Option<IpcSender<Vec<u8>>>,
@@ -61,13 +60,11 @@ struct TransmitBodyConnectHandler {
 impl TransmitBodyConnectHandler {
     pub fn new(
         stream: Trusted<ReadableStream>,
-        global: Trusted<GlobalScope>,
         task_source: NetworkingTaskSource,
         canceller: TaskCanceller,
     ) -> TransmitBodyConnectHandler {
         TransmitBodyConnectHandler {
             stream: stream,
-            global,
             task_source,
             canceller,
             bytes_sender: None,
@@ -75,34 +72,11 @@ impl TransmitBodyConnectHandler {
     }
 
     pub fn start_reading(&mut self, sender: IpcSender<Vec<u8>>) {
-        let global = self.global.clone();
-        let stream = self.stream.clone();
-
         self.bytes_sender = Some(sender);
-
-        let _ = self.task_source.queue_with_canceller(
-            task!(setup_native_body_promise_handler: move || {
-                let rooted_stream = stream.root();
-                let global = global.root();
-
-                let _ = enter_realm(&*global);
-                let in_realm_proof = AlreadyInRealm::assert(&global);
-                let _ais = AutoIncumbentScript::new(&global);
-
-                if rooted_stream.start_reading().is_err() {
-                    // Note: this can happen if script starts consuming request body
-                    // before fetch starts transmitting it.
-                    return;
-                }
-
-            }),
-            &self.canceller,
-        );
     }
 
     /// <https://fetch.spec.whatwg.org/#concept-request-transmit-body>
     pub fn transmit_body_chunk(&mut self) {
-        let global = self.global.clone();
         let stream = self.stream.clone();
         let bytes_sender = self
             .bytes_sender
@@ -112,11 +86,21 @@ impl TransmitBodyConnectHandler {
         let _ = self.task_source.queue_with_canceller(
             task!(setup_native_body_promise_handler: move || {
                 let rooted_stream = stream.root();
-                let global = global.root();
+                let global = rooted_stream.global();
 
-                let _ = enter_realm(&*global);
-                let in_realm_proof = AlreadyInRealm::assert(&global);
-                let _ais = AutoIncumbentScript::new(&global);
+                println!("Starting to read stream for transmit body.");
+
+                if rooted_stream.start_reading().is_err() {
+                    // Note: this can happen if script starts consuming request body
+                    // before fetch starts transmitting it.
+                    return;
+                }
+
+                let _realm = enter_realm(&*global);
+                AlreadyInRealm::assert(&*global);
+                let _ais = AutoIncumbentScript::new(&*global);
+
+                 println!("Reading a chunk from stream for transmit body.");
 
                 let promise = rooted_stream.read_a_chunk();
 
@@ -202,10 +186,7 @@ impl ExtractedBody {
     ///
     /// Transmitting a body over fetch, and consuming it in script,
     /// are mutually exclusive operations, since each will lock the stream to a reader.
-    pub fn into_net_request_body(
-        self,
-        global: &GlobalScope,
-    ) -> (RequestBody, DomRoot<ReadableStream>) {
+    pub fn into_net_request_body(self) -> (RequestBody, DomRoot<ReadableStream>) {
         let ExtractedBody {
             stream,
             total_bytes,
@@ -218,13 +199,13 @@ impl ExtractedBody {
         let (chunk_request_sender, chunk_request_receiver) = ipc::channel().unwrap();
 
         let trusted_stream = Trusted::new(&*stream);
-        let trusted_global = Trusted::new(global);
 
+        let global = stream.global();
         let task_source = global.networking_task_source();
         let canceller = global.task_canceller(TaskSourceName::Networking);
 
         let mut body_handler =
-            TransmitBodyConnectHandler::new(trusted_stream, trusted_global, task_source, canceller);
+            TransmitBodyConnectHandler::new(trusted_stream, task_source, canceller);
 
         ROUTER.add_route(
             chunk_request_receiver.to_opaque(),
@@ -500,9 +481,10 @@ impl Callback for ConsumeBodyPromiseHandler {
 
             bytes.extend_from_slice(&*chunk);
 
-            let in_realm_proof = AlreadyInRealm::assert_for_cx(cx);
-            let global = GlobalScope::from_safe_context(cx, InRealm::Already(&in_realm_proof));
-            let _ais = AutoIncumbentScript::new(&global);
+            let global = self.stream.global();
+            let _realm = enter_realm(&*global);
+            AlreadyInRealm::assert(&*global);
+            let _ais = AutoIncumbentScript::new(&*global);
 
             // Read another chunk.
             println!("Reading another chunk as part of ConsumeBodyPromiseHandler");
@@ -531,6 +513,7 @@ impl Callback for ConsumeBodyPromiseHandler {
 #[allow(unrooted_must_root)]
 pub fn consume_body<T: BodyOperations + DomObject>(object: &T, body_type: BodyType) -> Rc<Promise> {
     let global = object.global();
+    println!("Consume body");
     let in_realm_proof = AlreadyInRealm::assert(&global);
     let _ais = AutoIncumbentScript::new(&global);
     let promise =
@@ -559,7 +542,6 @@ fn consume_body_with_promise<T: BodyOperations + DomObject>(
     promise: Rc<Promise>,
 ) {
     let global = object.global();
-    let in_realm_proof = AlreadyInRealm::assert(&global);
     let _ais = AutoIncumbentScript::new(&global);
 
     let stream = match object.get_stream() {
