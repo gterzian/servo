@@ -13,7 +13,7 @@ use crate::dom::bindings::utils::get_dictionary_property;
 use crate::dom::globalscope::GlobalScope;
 use crate::dom::promise::Promise;
 use crate::js::conversions::FromJSValConvertible;
-use crate::realms::{AlreadyInRealm, InRealm};
+use crate::realms::{enter_realm, AlreadyInRealm, InRealm};
 use crate::script_runtime::JSContext as SafeJSContext;
 use crate::task::TaskCanceller;
 use crate::task_source::dom_manipulation::DOMManipulationTaskSource;
@@ -170,7 +170,9 @@ impl ReadableStream {
     }
 
     #[allow(unsafe_code)]
-    pub fn enqueue_native(&self, global: &GlobalScope, bytes: Vec<u8>) {
+    pub fn enqueue_native(&self, bytes: Vec<u8>) {
+        let global = self.global();
+        let ar = enter_realm(&*global);
         let cx = global.get_cx();
 
         let stream_handle = unsafe { self.js_stream.handle() };
@@ -183,7 +185,8 @@ impl ReadableStream {
 
     #[allow(unsafe_code)]
     pub fn error_native(&self, error: Error) {
-        let global = GlobalScope::current().expect("No current global object.");
+        let global = self.global();
+        let ar = enter_realm(&*global);
         let cx = global.get_cx();
 
         unsafe {
@@ -199,7 +202,8 @@ impl ReadableStream {
 
     #[allow(unsafe_code)]
     pub fn close_native(&self) {
-        let global = GlobalScope::current().expect("No current global object.");
+        let global = self.global();
+        let ar = enter_realm(&*global);
         let cx = global.get_cx();
 
         let handle = unsafe { self.js_stream.handle() };
@@ -213,9 +217,9 @@ impl ReadableStream {
     /// Acquires a reader and locks the stream,
     /// must be done before `read_a_chunk`.
     #[allow(unsafe_code)]
-    pub fn start_reading(&self) {
-        if self.has_reader.get() {
-            panic!("ReadableStream::start_reading called on a locked stream.");
+    pub fn start_reading(&self) -> Result<(), ()> {
+        if self.is_locked() || self.is_disturbed() {
+            return Err(());
         }
 
         let cx = self.global().get_cx();
@@ -234,15 +238,16 @@ impl ReadableStream {
         }
 
         self.has_reader.set(true);
+        Ok(())
     }
 
     /// Read a chunk from the stream,
     /// must be called after `start_reading`,
     /// and before `stop_reading`.
     #[allow(unsafe_code)]
-    pub fn read_a_chunk(&self) -> Rc<Promise> {
+    pub fn read_a_chunk(&self) -> Result<Rc<Promise>, ()> {
         if !self.has_reader.get() {
-            panic!("ReadableStream::read_a_chunk called before start_reading.");
+            return Err(());
         }
 
         println!("Reading a chunk from a stream");
@@ -255,7 +260,7 @@ impl ReadableStream {
                 *cx,
                 self.js_reader.handle(),
             ));
-            Promise::new_with_js_promise(promise_obj.handle(), cx)
+            Ok(Promise::new_with_js_promise(promise_obj.handle(), cx))
         }
     }
 
@@ -495,14 +500,15 @@ impl ExternalUnderlyingSourceController {
     }
 
     #[allow(unsafe_code)]
-    fn pull(&self, cx: SafeJSContext, stream: HandleObject, _desired_size: usize) {
+    fn pull(&self, cx: SafeJSContext, stream: HandleObject, desired_size: usize) {
         // Note: for pull sources,
         // this would be the time to ask for a chunk.
 
         println!(
-            "Pull steps ExternalUnderlyingSourceController with buffer: {:?} closed: {:?}",
+            "Pull steps ExternalUnderlyingSourceController with buffer: {:?} closed: {:?} desired_size: {:?}",
             self.buffer.borrow().len(),
-            *self.closed.borrow()
+            *self.closed.borrow(),
+            desired_size,
         );
 
         let closed = { *self.closed.borrow() };
@@ -517,7 +523,7 @@ impl ExternalUnderlyingSourceController {
         };
 
         if available > 0 {
-            self.signal_available_bytes(cx, stream, available);
+            self.signal_available_bytes(cx, stream, desired_size);
         }
     }
 
@@ -541,6 +547,11 @@ impl ExternalUnderlyingSourceController {
 
         unsafe {
             *bytes_written = chunk.len();
+            println!(
+                "Writing into buffer with length: {:?} a chunk of len: {:?}",
+                length,
+                chunk.len()
+            );
             ptr::copy_nonoverlapping(chunk.as_ptr(), buffer as *mut u8, chunk.len());
         }
     }

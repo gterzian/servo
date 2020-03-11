@@ -463,9 +463,7 @@ impl Response {
         if let Some(stream_consumer) = self.stream_consumer.borrow_mut().as_ref() {
             stream_consumer.consume_chunk(chunk.as_slice());
         } else {
-            self.body_stream
-                .borrow_mut()
-                .enqueue_native(&self.global(), chunk);
+            self.body_stream.borrow_mut().enqueue_native(chunk);
         }
     }
 

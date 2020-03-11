@@ -23,7 +23,7 @@ use crate::dom::readablestream::{
     get_read_promise_bytes, get_read_promise_done, ExternalUnderlyingSource, ReadableStream,
 };
 use crate::dom::urlsearchparams::URLSearchParams;
-use crate::realms::{AlreadyInRealm, InRealm};
+use crate::realms::{enter_realm, AlreadyInRealm, InRealm};
 use crate::script_runtime::JSContext;
 use crate::task::TaskCanceller;
 use crate::task_source::networking::NetworkingTaskSource;
@@ -55,7 +55,7 @@ struct TransmitBodyConnectHandler {
     global: Trusted<GlobalScope>,
     task_source: NetworkingTaskSource,
     canceller: TaskCanceller,
-    pub bytes_sender: Option<IpcSender<Vec<u8>>>,
+    bytes_sender: Option<IpcSender<Vec<u8>>>,
 }
 
 impl TransmitBodyConnectHandler {
@@ -74,6 +74,32 @@ impl TransmitBodyConnectHandler {
         }
     }
 
+    pub fn start_reading(&mut self, sender: IpcSender<Vec<u8>>) {
+        let global = self.global.clone();
+        let stream = self.stream.clone();
+
+        self.bytes_sender = Some(sender);
+
+        let _ = self.task_source.queue_with_canceller(
+            task!(setup_native_body_promise_handler: move || {
+                let rooted_stream = stream.root();
+                let global = global.root();
+
+                let _ = enter_realm(&*global);
+                let in_realm_proof = AlreadyInRealm::assert(&global);
+                let _ais = AutoIncumbentScript::new(&global);
+
+                if rooted_stream.start_reading().is_err() {
+                    // Note: this can happen if script starts consuming request body
+                    // before fetch starts transmitting it.
+                    return;
+                }
+
+            }),
+            &self.canceller,
+        );
+    }
+
     /// <https://fetch.spec.whatwg.org/#concept-request-transmit-body>
     pub fn transmit_body_chunk(&mut self) {
         let global = self.global.clone();
@@ -88,21 +114,21 @@ impl TransmitBodyConnectHandler {
                 let rooted_stream = stream.root();
                 let global = global.root();
 
+                let _ = enter_realm(&*global);
                 let in_realm_proof = AlreadyInRealm::assert(&global);
                 let _ais = AutoIncumbentScript::new(&global);
 
-                rooted_stream.start_reading();
-                let promise = rooted_stream.read_a_chunk();
+                if let Ok(promise) = rooted_stream.read_a_chunk() {
+                    let promise_handler = Box::new(TransmitBodyPromiseHandler {
+                        bytes_sender,
+                        stream: rooted_stream.clone(),
+                    });
 
-                let promise_handler = Box::new(TransmitBodyPromiseHandler {
-                    bytes_sender,
-                    stream: rooted_stream.clone(),
-                });
+                    let rejection_handler = Box::new(TransmitBodyPromiseRejectionHandler {stream: rooted_stream});
 
-                let rejection_handler = Box::new(TransmitBodyPromiseRejectionHandler {stream: rooted_stream});
-
-                let handler = PromiseNativeHandler::new(&global, Some(promise_handler), Some(rejection_handler));
-                promise.append_native_handler(&handler);
+                    let handler = PromiseNativeHandler::new(&global, Some(promise_handler), Some(rejection_handler));
+                    promise.append_native_handler(&handler);
+                }
             }),
             &self.canceller,
         );
@@ -206,7 +232,7 @@ impl ExtractedBody {
                 let request = message.to().unwrap();
                 match request {
                     BodyChunkRequest::Connect(sender) => {
-                        body_handler.bytes_sender = Some(sender);
+                        body_handler.start_reading(sender);
                     },
                     BodyChunkRequest::Chunk => body_handler.transmit_body_chunk(),
                 }
@@ -480,7 +506,15 @@ impl Callback for ConsumeBodyPromiseHandler {
 
             // Read another chunk.
             println!("Reading another chunk as part of ConsumeBodyPromiseHandler");
-            let read_promise = self.stream.read_a_chunk();
+            let read_promise = match self.stream.read_a_chunk() {
+                Err(_) => {
+                    println!("Not reading because locked or disturbed");
+                    return self.result_promise.reject_error(Error::Type(
+                        "The body's stream is disturbed or locked".to_string(),
+                    ));
+                },
+                Ok(read_promise) => read_promise,
+            };
 
             let promise_handler = Box::new(ConsumeBodyPromiseHandler {
                 result_promise: self.result_promise.clone(),
@@ -513,7 +547,7 @@ pub fn consume_body<T: BodyOperations + DomObject>(object: &T, body_type: BodyTy
     // Step 1
     if object.get_body_used() || object.is_locked() {
         promise.reject_error(Error::Type(
-            "The response's stream is disturbed or locked".to_string(),
+            "The body's stream is disturbed or locked".to_string(),
         ));
         return promise;
     }
@@ -541,9 +575,15 @@ pub fn consume_body_with_promise<T: BodyOperations + DomObject>(
         None => return,
     };
 
-    stream.start_reading();
+    if stream.start_reading().is_err() {
+        return promise.reject_error(Error::Type(
+            "The response's stream is disturbed or locked".to_string(),
+        ));
+    }
 
-    let read_promise = stream.read_a_chunk();
+    let read_promise = stream
+        .read_a_chunk()
+        .expect("Stream became locked or disturbed, while locked");
 
     let promise_handler = Box::new(ConsumeBodyPromiseHandler {
         result_promise: promise.clone(),
