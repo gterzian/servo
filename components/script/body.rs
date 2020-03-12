@@ -132,12 +132,14 @@ impl Callback for TransmitBodyPromiseHandler {
             Ok(is_done) => is_done,
             Err(_) => {
                 // TODO: terminate fetch.
+                println!("Error reading promise done value, stopping reading.");
                 return self.stream.stop_reading();
             },
         };
 
         if is_done {
             // TODO: queue a fetch task on request to process request end-of-body.
+            println!("Stream is done, stopping reading.");
             return self.stream.stop_reading();
         }
 
@@ -145,11 +147,13 @@ impl Callback for TransmitBodyPromiseHandler {
             Ok(chunk) => chunk,
             Err(_) => {
                 // TODO: terminate fetch.
+                println!("Error reading promise bytes value, stopping reading.");
                 return self.stream.stop_reading();
             },
         };
 
         // Send the chunk to the body transmitter in net::http_loader::obtain_response.
+        println!("Sending a chunk over IPC.");
         let _ = self.bytes_sender.send(chunk);
     }
 }
@@ -544,10 +548,7 @@ fn consume_body_with_promise<T: BodyOperations + DomObject>(
     let global = object.global();
     let _ais = AutoIncumbentScript::new(&global);
 
-    let stream = match object.get_stream() {
-        Some(body) => body,
-        None => return,
-    };
+    let stream = object.get_stream();
 
     if stream.start_reading().is_err() {
         return promise.reject_error(Error::Type(
@@ -694,7 +695,7 @@ pub trait BodyOperations {
     fn set_body_promise(&self, p: &Rc<Promise>, body_type: BodyType);
     /// Returns `Some(_)` if the body is complete, `None` if there is more to
     /// come.
-    fn get_stream(&self) -> Option<DomRoot<ReadableStream>>;
+    fn get_stream(&self) -> DomRoot<ReadableStream>;
     fn is_locked(&self) -> bool;
     fn get_mime_type(&self) -> Vec<u8>;
 }

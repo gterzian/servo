@@ -575,11 +575,13 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
                     "application/xml;charset=UTF-8"
                 };
                 let total_bytes = data.len();
-                Some(ExtractedBody {
-                    stream: ReadableStream::new_with_external_underlying_source(
+                let stream = ReadableStream::new_with_external_underlying_source(
                         &self.global(),
                         ExternalUnderlyingSource::Memory(data),
-                    ),
+                    );
+                    stream.close_native();
+                Some(ExtractedBody {
+                    stream,
                     total_bytes,
                     content_type: Some(DOMString::from(content_type)),
                     source: BodySource::Null,
@@ -596,11 +598,13 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
             Some(DocumentOrBodyInit::ArrayBuffer(ref typedarray)) => {
                 let bytes = typedarray.to_vec();
                 let total_bytes = bytes.len();
-                Some(ExtractedBody {
-                    stream: ReadableStream::new_with_external_underlying_source(
+                let stream = ReadableStream::new_with_external_underlying_source(
                         &self.global(),
                         ExternalUnderlyingSource::Memory(bytes),
-                    ),
+                    );
+                    stream.close_native();
+                Some(ExtractedBody {
+                    stream,
                     total_bytes,
                     content_type: None,
                     source: BodySource::BufferSource,
@@ -609,11 +613,13 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
             Some(DocumentOrBodyInit::ArrayBufferView(ref typedarray)) => {
                 let bytes = typedarray.to_vec();
                 let total_bytes = bytes.len();
-                Some(ExtractedBody {
-                    stream: ReadableStream::new_with_external_underlying_source(
+                let stream = ReadableStream::new_with_external_underlying_source(
                         &self.global(),
                         ExternalUnderlyingSource::Memory(bytes),
-                    ),
+                    );
+                    stream.close_native();
+                Some(ExtractedBody {
+                    stream,
                     total_bytes,
                     content_type: None,
                     source: BodySource::BufferSource,

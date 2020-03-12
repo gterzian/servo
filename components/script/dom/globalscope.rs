@@ -433,7 +433,7 @@ fn stream_handle_incoming(stream: DomRoot<ReadableStream>, bytes: Result<Vec<u8>
     match bytes {
         Ok(b) => {
             let global = stream.global();
-            stream.enqueue_native(b);
+            stream.enqueue_native(b.as_slice());
         },
         Err(e) => {
             stream.error_native(e);
@@ -1509,7 +1509,7 @@ impl GlobalScope {
                     ExternalUnderlyingSource::Blob(bytes.len()),
                 );
                 // If we have all the bytes in memory, queue them and close the stream.
-                stream.enqueue_native(bytes);
+                stream.enqueue_native(bytes.as_slice());
                 stream.close_native();
                 return stream;
             },

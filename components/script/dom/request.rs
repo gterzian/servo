@@ -24,7 +24,7 @@ use crate::dom::bindings::trace::RootedTraceableBox;
 use crate::dom::globalscope::GlobalScope;
 use crate::dom::headers::{Guard, Headers};
 use crate::dom::promise::Promise;
-use crate::dom::readablestream::ReadableStream;
+use crate::dom::readablestream::{ExternalUnderlyingSource, ReadableStream};
 use dom_struct::dom_struct;
 use http::header::{HeaderName, HeaderValue};
 use http::method::InvalidMethod;
@@ -49,7 +49,7 @@ pub struct Request {
     request: DomRefCell<NetTraitsRequest>,
     body_used: Cell<bool>,
     #[ignore_malloc_size_of = "Rc"]
-    body_stream: DomRefCell<Option<DomRoot<ReadableStream>>>,
+    body_stream: DomRefCell<DomRoot<ReadableStream>>,
     headers: MutNullableDom<Headers>,
     mime_type: DomRefCell<Vec<u8>>,
     #[ignore_malloc_size_of = "Rc"]
@@ -58,11 +58,16 @@ pub struct Request {
 
 impl Request {
     fn new_inherited(global: &GlobalScope, url: ServoUrl) -> Request {
+        let stream = ReadableStream::new_with_external_underlying_source(
+            global,
+            ExternalUnderlyingSource::FetchRequest,
+        );
+        stream.close_native();
         Request {
             reflector_: Reflector::new(),
             request: DomRefCell::new(net_request_from_global(global, url)),
             body_used: Cell::new(false),
-            body_stream: DomRefCell::new(None),
+            body_stream: DomRefCell::new(stream),
             headers: Default::default(),
             mime_type: DomRefCell::new("".to_string().into_bytes()),
             body_promise: DomRefCell::new(None),
@@ -450,7 +455,8 @@ impl Request {
             }
 
             let (net_body, body_stream) = extracted_body.into_net_request_body();
-            *r.body_stream.borrow_mut() = Some(body_stream);
+            println!("Setting request body stream from body init.");
+            *r.body_stream.borrow_mut() = body_stream;
             input_body = Some(net_body);
         }
 
@@ -647,10 +653,7 @@ impl RequestMethods for Request {
             return true;
         }
 
-        let body_stream = self.body_stream.borrow_mut().take();
-        body_stream
-            .and_then(|stream| Some(stream.is_disturbed()))
-            .unwrap_or(false)
+        self.body_stream.borrow().is_disturbed()
     }
 
     // https://fetch.spec.whatwg.org/#dom-request-clone
@@ -705,15 +708,11 @@ impl BodyOperations for Request {
     }
 
     fn is_locked(&self) -> bool {
-        let body_stream = self.body_stream.borrow_mut().take();
-        body_stream
-            .and_then(|stream| Some(stream.is_locked()))
-            .unwrap_or(false)
+        self.body_stream.borrow().is_locked()
     }
 
-    fn get_stream(&self) -> Option<DomRoot<ReadableStream>> {
-        let body_stream = self.body_stream.borrow_mut().take();
-        body_stream.and_then(|stream| Some(DomRoot::from_ref(&*stream)))
+    fn get_stream(&self) -> DomRoot<ReadableStream> {
+        self.body_stream.borrow().clone()
     }
 
     fn get_mime_type(&self) -> Vec<u8> {

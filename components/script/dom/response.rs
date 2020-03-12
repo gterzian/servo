@@ -61,6 +61,7 @@ impl Response {
             global,
             ExternalUnderlyingSource::FetchResponse,
         );
+        stream.close_native();
         Response {
             reflector_: Reflector::new(),
             headers_reflector: Default::default(),
@@ -251,8 +252,8 @@ impl BodyOperations for Response {
         self.body_stream.borrow().is_locked()
     }
 
-    fn get_stream(&self) -> Option<DomRoot<ReadableStream>> {
-        Some(self.body_stream.borrow().clone())
+    fn get_stream(&self) -> DomRoot<ReadableStream> {
+        self.body_stream.borrow().clone()
     }
 
     fn get_mime_type(&self) -> Vec<u8> {
@@ -463,7 +464,7 @@ impl Response {
         if let Some(stream_consumer) = self.stream_consumer.borrow_mut().as_ref() {
             stream_consumer.consume_chunk(chunk.as_slice());
         } else {
-            self.body_stream.borrow_mut().enqueue_native(chunk);
+            self.body_stream.borrow_mut().enqueue_native(chunk.as_slice());
         }
     }
 
