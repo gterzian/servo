@@ -281,8 +281,7 @@ fn test_request_and_response_data_with_network_messages() {
         url: url,
         method: Method::GET,
         headers: headers,
-        // TODO: integrate body stream with devtools.
-        body: None,
+        body: Some(vec![]),
         pipeline_id: TEST_PIPELINE_ID,
         startedDateTime: devhttprequest.startedDateTime,
         timeStamp: devhttprequest.timeStamp,

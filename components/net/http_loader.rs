@@ -52,7 +52,7 @@ use std::iter::FromIterator;
 use std::mem;
 use std::ops::Deref;
 use std::str::FromStr;
-use std::sync::{Condvar, Mutex, RwLock};
+use std::sync::{Arc as StdArc, Condvar, Mutex, RwLock};
 use std::time::{Duration, SystemTime};
 use time::{self, Tm};
 use tokio::prelude::{future, Future, Sink, Stream};
@@ -387,6 +387,8 @@ fn obtain_response(
     // https://tools.ietf.org/html/rfc7231#section-6.4
     let is_redirected_request = iters != 1;
 
+    let devtools_bytes = StdArc::new(Mutex::new(vec![]));
+
     let request_body = match body {
         Some(chunk_requester) if !is_redirected_request => {
             headers.typed_insert(ContentLength(request_len as u64));
@@ -400,12 +402,21 @@ fn obtain_response(
             // Request the first chunk, corresponding to Step 3 and 4.
             let _ = chunk_requester.send(BodyChunkRequest::Chunk);
 
+            let devtools_bytes = StdArc::downgrade(&devtools_bytes);
+
             ROUTER.add_route(
                 body_port.to_opaque(),
                 Box::new(move |message| {
                     let bytes: Vec<u8> = message.to().unwrap();
                     let chunk_requester = chunk_requester.clone();
                     let sender = sender.clone();
+
+                    devtools_bytes
+                        .upgrade()
+                        .expect("Couldn't upgrade devtools bytes weak.")
+                        .lock()
+                        .unwrap()
+                        .append(&mut bytes.clone());
 
                     HANDLE.lock().unwrap().spawn(
                         // Step 5.1.2.2
@@ -505,13 +516,18 @@ fn obtain_response(
 
                 let msg = if let Some(request_id) = request_id {
                     if let Some(pipeline_id) = pipeline_id {
+                        let devtools_bytes = StdArc::try_unwrap(devtools_bytes)
+                            .expect("Couldn't unwrap arc to devtool bytes.");
                         Some(prepare_devtools_request(
                             request_id,
                             closure_url,
                             method.clone(),
                             headers,
-                            // TODO: integrate with RequestBody.
-                            None,
+                            Some(
+                                devtools_bytes
+                                    .into_inner()
+                                    .expect("Failed to get devtools request bytes."),
+                            ),
                             pipeline_id,
                             time::now(),
                             connect_end - connect_start,
