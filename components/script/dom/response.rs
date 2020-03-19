@@ -20,12 +20,15 @@ use crate::dom::headers::{is_obs_text, is_vchar};
 use crate::dom::headers::{Guard, Headers};
 use crate::dom::promise::Promise;
 use crate::dom::readablestream::{ExternalUnderlyingSource, ReadableStream};
+use crate::script_runtime::JSContext as SafeJSContext;
 use crate::script_runtime::StreamConsumer;
 use dom_struct::dom_struct;
 use http::header::HeaderMap as HyperHeaders;
 use hyper::StatusCode;
 use hyper_serde::Serde;
+use js::jsapi::JSObject;
 use servo_url::ServoUrl;
+use std::ptr::NonNull;
 use std::rc::Rc;
 use std::str::FromStr;
 use url::Position;
@@ -356,6 +359,11 @@ impl ResponseMethods for Response {
     // https://fetch.spec.whatwg.org/#dom-body-bodyused
     fn BodyUsed(&self) -> bool {
         self.is_disturbed()
+    }
+
+    /// <https://fetch.spec.whatwg.org/#dom-body-body>
+    fn GetBody(&self, _cx: SafeJSContext) -> Option<NonNull<JSObject>> {
+        self.body().and_then(|stream| Some(stream.get_js_stream()))
     }
 
     // https://fetch.spec.whatwg.org/#dom-body-text

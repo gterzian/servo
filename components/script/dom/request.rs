@@ -24,10 +24,12 @@ use crate::dom::globalscope::GlobalScope;
 use crate::dom::headers::{Guard, Headers};
 use crate::dom::promise::Promise;
 use crate::dom::readablestream::ReadableStream;
+use crate::script_runtime::JSContext as SafeJSContext;
 use dom_struct::dom_struct;
 use http::header::{HeaderName, HeaderValue};
 use http::method::InvalidMethod;
 use http::Method as HttpMethod;
+use js::jsapi::JSObject;
 use net_traits::request::CacheMode as NetTraitsRequestCache;
 use net_traits::request::CredentialsMode as NetTraitsRequestCredentials;
 use net_traits::request::Destination as NetTraitsRequestDestination;
@@ -38,6 +40,7 @@ use net_traits::request::RequestMode as NetTraitsRequestMode;
 use net_traits::request::{Origin, Window};
 use net_traits::ReferrerPolicy as MsgReferrerPolicy;
 use servo_url::ServoUrl;
+use std::ptr::NonNull;
 use std::rc::Rc;
 use std::str::FromStr;
 
@@ -625,6 +628,11 @@ impl RequestMethods for Request {
     fn Integrity(&self) -> DOMString {
         let r = self.request.borrow();
         DOMString::from_string(r.integrity_metadata.clone())
+    }
+
+    /// <https://fetch.spec.whatwg.org/#dom-body-body>
+    fn GetBody(&self, _cx: SafeJSContext) -> Option<NonNull<JSObject>> {
+        self.body().and_then(|stream| Some(stream.get_js_stream()))
     }
 
     // https://fetch.spec.whatwg.org/#dom-body-bodyused
