@@ -131,7 +131,7 @@ impl Response {
                 total_bytes: _,
                 content_type,
                 source: _,
-            } = body.extract(global);
+            } = body.extract(global)?;
 
             r.body_stream.set(Some(&*stream));
 

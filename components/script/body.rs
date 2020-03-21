@@ -289,12 +289,12 @@ impl ExtractedBody {
 
 /// <https://fetch.spec.whatwg.org/#concept-bodyinit-extract>
 pub trait Extractable {
-    fn extract(&self, global: &GlobalScope) -> ExtractedBody;
+    fn extract(&self, global: &GlobalScope) -> Fallible<ExtractedBody>;
 }
 
 impl Extractable for BodyInit {
     // https://fetch.spec.whatwg.org/#concept-bodyinit-extract
-    fn extract(&self, global: &GlobalScope) -> ExtractedBody {
+    fn extract(&self, global: &GlobalScope) -> Fallible<ExtractedBody> {
         match self {
             BodyInit::String(ref s) => s.extract(global),
             BodyInit::URLSearchParams(ref usp) => usp.extract(global),
@@ -309,12 +309,12 @@ impl Extractable for BodyInit {
                 );
                 stream.enqueue_native(bytes);
                 stream.close_native();
-                ExtractedBody {
+                Ok(ExtractedBody {
                     stream,
                     total_bytes,
                     content_type: None,
                     source: BodySource::BufferSource,
-                }
+                })
             },
             BodyInit::ArrayBufferView(ref typedarray) => {
                 let bytes = typedarray.to_vec();
@@ -325,28 +325,36 @@ impl Extractable for BodyInit {
                 );
                 stream.enqueue_native(bytes);
                 stream.close_native();
-                ExtractedBody {
+                Ok(ExtractedBody {
                     stream,
                     total_bytes,
                     content_type: None,
                     source: BodySource::BufferSource,
-                }
+                })
             },
-            BodyInit::ReadableStream(stream) => ExtractedBody {
+            BodyInit::ReadableStream(stream) => {
                 // TODO:
                 // 1. If the keepalive flag is set, then throw a TypeError.
-                // 2. If stream is disturbed or locked, then throw a TypeError.
-                stream: stream.clone(),
-                total_bytes: 0,
-                content_type: None,
-                source: BodySource::Null,
+
+                if stream.is_locked() || stream.is_disturbed() {
+                    return Err(Error::Type(
+                        "The body's stream is disturbed or locked".to_string(),
+                    ));
+                }
+
+                Ok(ExtractedBody {
+                    stream: stream.clone(),
+                    total_bytes: 0,
+                    content_type: None,
+                    source: BodySource::Null,
+                })
             },
         }
     }
 }
 
 impl Extractable for Vec<u8> {
-    fn extract(&self, global: &GlobalScope) -> ExtractedBody {
+    fn extract(&self, global: &GlobalScope) -> Fallible<ExtractedBody> {
         let bytes = self.clone();
         let total_bytes = self.len();
         let stream = ReadableStream::new_with_external_underlying_source(
@@ -355,35 +363,35 @@ impl Extractable for Vec<u8> {
         );
         stream.enqueue_native(bytes);
         stream.close_native();
-        ExtractedBody {
+        Ok(ExtractedBody {
             stream,
             total_bytes,
             content_type: None,
             // A vec is used only in `submit_entity_body`.
             source: BodySource::FormData,
-        }
+        })
     }
 }
 
 impl Extractable for Blob {
-    fn extract(&self, _global: &GlobalScope) -> ExtractedBody {
+    fn extract(&self, _global: &GlobalScope) -> Fallible<ExtractedBody> {
         let content_type = if self.Type().as_ref().is_empty() {
             None
         } else {
             Some(self.Type())
         };
         let total_bytes = self.Size() as usize;
-        ExtractedBody {
+        Ok(ExtractedBody {
             stream: self.get_stream(),
             total_bytes,
             content_type,
             source: BodySource::Blob,
-        }
+        })
     }
 }
 
 impl Extractable for DOMString {
-    fn extract(&self, global: &GlobalScope) -> ExtractedBody {
+    fn extract(&self, global: &GlobalScope) -> Fallible<ExtractedBody> {
         let bytes = self.as_bytes().to_owned();
         let total_bytes = bytes.len();
         let content_type = Some(DOMString::from("text/plain;charset=UTF-8"));
@@ -393,17 +401,17 @@ impl Extractable for DOMString {
         );
         stream.enqueue_native(bytes);
         stream.close_native();
-        ExtractedBody {
+        Ok(ExtractedBody {
             stream,
             total_bytes,
             content_type,
             source: BodySource::USVString,
-        }
+        })
     }
 }
 
 impl Extractable for FormData {
-    fn extract(&self, global: &GlobalScope) -> ExtractedBody {
+    fn extract(&self, global: &GlobalScope) -> Fallible<ExtractedBody> {
         let boundary = generate_boundary();
         let bytes = encode_multipart_form_data(&mut self.datums(), boundary.clone(), UTF_8);
         let total_bytes = bytes.len();
@@ -417,17 +425,17 @@ impl Extractable for FormData {
         );
         stream.enqueue_native(bytes);
         stream.close_native();
-        ExtractedBody {
+        Ok(ExtractedBody {
             stream,
             total_bytes,
             content_type,
             source: BodySource::FormData,
-        }
+        })
     }
 }
 
 impl Extractable for URLSearchParams {
-    fn extract(&self, global: &GlobalScope) -> ExtractedBody {
+    fn extract(&self, global: &GlobalScope) -> Fallible<ExtractedBody> {
         let bytes = self.serialize_utf8().into_bytes();
         let total_bytes = bytes.len();
         let content_type = Some(DOMString::from(
@@ -439,12 +447,12 @@ impl Extractable for URLSearchParams {
         );
         stream.enqueue_native(bytes);
         stream.close_native();
-        ExtractedBody {
+        Ok(ExtractedBody {
             stream,
             total_bytes,
             content_type,
             source: BodySource::URLSearchParams,
-        }
+        })
     }
 }
 

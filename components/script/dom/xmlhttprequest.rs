@@ -584,14 +584,22 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
                     source: BodySource::Null,
                 })
             },
-            Some(DocumentOrBodyInit::Blob(ref b)) => Some(b.extract(&self.global())),
-            Some(DocumentOrBodyInit::FormData(ref formdata)) => {
-                Some(formdata.extract(&self.global()))
+            Some(DocumentOrBodyInit::Blob(ref b)) => {
+                Some(b.extract(&self.global()).expect("Couldn't extract body."))
             },
-            Some(DocumentOrBodyInit::String(ref str)) => Some(str.extract(&self.global())),
-            Some(DocumentOrBodyInit::URLSearchParams(ref urlsp)) => {
-                Some(urlsp.extract(&self.global()))
+            Some(DocumentOrBodyInit::FormData(ref formdata)) => Some(
+                formdata
+                    .extract(&self.global())
+                    .expect("Couldn't extract body."),
+            ),
+            Some(DocumentOrBodyInit::String(ref str)) => {
+                Some(str.extract(&self.global()).expect("Couldn't extract body."))
             },
+            Some(DocumentOrBodyInit::URLSearchParams(ref urlsp)) => Some(
+                urlsp
+                    .extract(&self.global())
+                    .expect("Couldn't extract body."),
+            ),
             Some(DocumentOrBodyInit::ArrayBuffer(ref typedarray)) => {
                 let bytes = typedarray.to_vec();
                 let total_bytes = bytes.len();

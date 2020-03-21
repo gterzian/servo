@@ -412,7 +412,7 @@ impl Request {
             // Step 36.2 TODO "If init["keepalive"] exists and is true..."
 
             // Step 36.3
-            let mut extracted_body = init_body.extract(global);
+            let mut extracted_body = init_body.extract(global)?;
 
             // Step 36.4
             if let Some(contents) = extracted_body.content_type.take() {
@@ -544,16 +544,14 @@ fn includes_credentials(input: &ServoUrl) -> bool {
     !input.username().is_empty() || input.password().is_some()
 }
 
-// TODO: `Readable Stream` object is not implemented in Servo yet.
 // https://fetch.spec.whatwg.org/#concept-body-disturbed
-fn request_is_disturbed(_input: &Request) -> bool {
-    false
+fn request_is_disturbed(input: &Request) -> bool {
+    input.is_disturbed()
 }
 
-// TODO: `Readable Stream` object is not implemented in Servo yet.
 // https://fetch.spec.whatwg.org/#concept-body-locked
-fn request_is_locked(_input: &Request) -> bool {
-    false
+fn request_is_locked(input: &Request) -> bool {
+    input.is_locked()
 }
 
 impl RequestMethods for Request {

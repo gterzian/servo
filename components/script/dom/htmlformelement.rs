@@ -791,7 +791,11 @@ impl HTMLFormElement {
 
         let global = self.global();
 
-        let request_body = bytes.extract(&global).into_net_request_body().0;
+        let request_body = bytes
+            .extract(&global)
+            .expect("Couldn't extract body.")
+            .into_net_request_body()
+            .0;
         load_data.data = Some(request_body);
 
         self.plan_to_navigate(load_data, target);

@@ -38,10 +38,7 @@ pub struct Blob {
 
 impl Blob {
     pub fn new(global: &GlobalScope, blob_impl: BlobImpl) -> DomRoot<Blob> {
-        let dom_blob = reflect_dom_object(
-            Box::new(Blob::new_inherited(&blob_impl)),
-            global,
-        );
+        let dom_blob = reflect_dom_object(Box::new(Blob::new_inherited(&blob_impl)), global);
         global.track_blob(&dom_blob, blob_impl);
         dom_blob
     }
