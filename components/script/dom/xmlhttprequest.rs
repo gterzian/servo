@@ -634,12 +634,23 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
                     source: BodySource::BufferSource,
                 })
             },
-            Some(DocumentOrBodyInit::ReadableStream(ref stream)) => Some(ExtractedBody {
-                stream: stream.clone(),
-                total_bytes: 0,
-                content_type: None,
-                source: BodySource::Null,
-            }),
+            Some(DocumentOrBodyInit::ReadableStream(ref stream)) => {
+                // TODO:
+                // 1. If the keepalive flag is set, then throw a TypeError.
+
+                if stream.is_locked() || stream.is_disturbed() {
+                    return Err(Error::Type(
+                        "The body's stream is disturbed or locked".to_string(),
+                    ));
+                }
+
+                Some(ExtractedBody {
+                    stream: stream.clone(),
+                    total_bytes: 0,
+                    content_type: None,
+                    source: BodySource::Null,
+                })
+            },
             None => None,
         };
 
