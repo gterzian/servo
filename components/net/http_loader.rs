@@ -411,12 +411,9 @@ fn obtain_response(
                     let chunk_requester = chunk_requester.clone();
                     let sender = sender.clone();
 
-                    devtools_bytes
-                        .upgrade()
-                        .expect("Couldn't upgrade devtools bytes weak.")
-                        .lock()
-                        .unwrap()
-                        .append(&mut bytes.clone());
+                    if let Some(devtools_bytes) = devtools_bytes.upgrade() {
+                        devtools_bytes.lock().unwrap().append(&mut bytes.clone());
+                    }
 
                     HANDLE.lock().unwrap().spawn(
                         // Step 5.1.2.2
