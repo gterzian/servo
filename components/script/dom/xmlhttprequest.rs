@@ -992,7 +992,6 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
                 Some(js_object) => unsafe { js_object.to_jsval(*cx, rval.handle_mut()) },
                 None => return NullValue(),
             },
-            XMLHttpRequestResponseType::Readablestream => return NullValue(),
         }
         rval.get()
     }

@@ -22,7 +22,6 @@ enum XMLHttpRequestResponseType {
   "document",
   "json",
   "text",
-  "readablestream",
 };
 
 [Exposed=(Window,Worker)]
