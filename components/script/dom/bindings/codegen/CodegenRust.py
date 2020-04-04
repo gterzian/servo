@@ -910,7 +910,7 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
         assert not isEnforceRange and not isClamp
 
         if failureCode is None:
-            unwrapFailureCode = '''throw_type_error(*cx, "This object is not
+            unwrapFailureCode = '''throw_type_error(*cx, "This object is not\
                     an instance of ReadableStream.");\n'''
         else:
             unwrapFailureCode = failureCode
@@ -920,7 +920,7 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
             {
                 match ReadableStream::from_js(cx, $${val}.get().to_object()) {
                     Ok(val) => val,
-                    Err(_) => {
+                    Err(()) => {
                     $*{failureCode}
                     }
                 }

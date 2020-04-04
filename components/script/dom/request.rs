@@ -683,15 +683,12 @@ impl BodyMixin for Request {
         let body_stream = self.body_stream.get();
         body_stream
             .as_ref()
-            .and_then(|stream| Some(stream.is_disturbed()))
-            .unwrap_or(false)
+            .map_or(false, |stream| stream.is_disturbed())
     }
 
     fn is_locked(&self) -> bool {
         let body_stream = self.body_stream.get();
-        body_stream
-            .and_then(|stream| Some(stream.is_locked()))
-            .unwrap_or(false)
+        body_stream.map_or(false, |stream| stream.is_locked())
     }
 
     fn body(&self) -> Option<DomRoot<ReadableStream>> {

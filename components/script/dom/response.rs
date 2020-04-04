@@ -226,15 +226,13 @@ impl BodyMixin for Response {
     fn is_disturbed(&self) -> bool {
         self.body_stream
             .get()
-            .and_then(|stream| Some(stream.is_disturbed()))
-            .unwrap_or(false)
+            .map_or(false, |stream| stream.is_disturbed())
     }
 
     fn is_locked(&self) -> bool {
         self.body_stream
             .get()
-            .and_then(|stream| Some(stream.is_locked()))
-            .unwrap_or(false)
+            .map_or(false, |stream| stream.is_locked())
     }
 
     fn body(&self) -> Option<DomRoot<ReadableStream>> {
@@ -452,10 +450,8 @@ impl Response {
         // Note, are these two actually mutually exclusive?
         if let Some(stream_consumer) = self.stream_consumer.borrow_mut().as_ref() {
             stream_consumer.consume_chunk(chunk.as_slice());
-        } else {
-            if let Some(body) = self.body_stream.get() {
-                body.enqueue_native(chunk);
-            }
+        } else if let Some(body) = self.body_stream.get() {
+            body.enqueue_native(chunk);
         }
     }
 

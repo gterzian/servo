@@ -26,7 +26,7 @@ use crate::dom::headers::is_forbidden_header_name;
 use crate::dom::node::Node;
 use crate::dom::performanceresourcetiming::InitiatorType;
 use crate::dom::progressevent::ProgressEvent;
-use crate::dom::readablestream::{ExternalUnderlyingSource, ReadableStream};
+use crate::dom::readablestream::ReadableStream;
 use crate::dom::servoparser::ServoParser;
 use crate::dom::window::Window;
 use crate::dom::workerglobalscope::WorkerGlobalScope;
@@ -571,12 +571,7 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
                 };
                 let total_bytes = bytes.len();
                 let global = self.global();
-                let stream = ReadableStream::new_with_external_underlying_source(
-                    &global,
-                    ExternalUnderlyingSource::Memory(total_bytes),
-                );
-                stream.enqueue_native(bytes);
-                stream.close_native();
+                let stream = ReadableStream::new_from_bytes(&global, bytes);
                 Some(ExtractedBody {
                     stream,
                     total_bytes,
@@ -604,12 +599,7 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
                 let bytes = typedarray.to_vec();
                 let total_bytes = bytes.len();
                 let global = self.global();
-                let stream = ReadableStream::new_with_external_underlying_source(
-                    &global,
-                    ExternalUnderlyingSource::Memory(total_bytes),
-                );
-                stream.enqueue_native(bytes);
-                stream.close_native();
+                let stream = ReadableStream::new_from_bytes(&global, bytes);
                 Some(ExtractedBody {
                     stream,
                     total_bytes,
@@ -621,12 +611,7 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
                 let bytes = typedarray.to_vec();
                 let total_bytes = bytes.len();
                 let global = self.global();
-                let stream = ReadableStream::new_with_external_underlying_source(
-                    &global,
-                    ExternalUnderlyingSource::Memory(total_bytes),
-                );
-                stream.enqueue_native(bytes);
-                stream.close_native();
+                let stream = ReadableStream::new_from_bytes(&global, bytes);
                 Some(ExtractedBody {
                     stream,
                     total_bytes,
@@ -665,12 +650,7 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
         // Step 6
         self.upload_complete.set(false);
         // Step 7
-        self.upload_complete.set(match extracted_or_serialized {
-            None => true,
-            // TODO: handle empty stream.
-            // Some(ref e) if e.0.is_empty() => true,
-            _ => false,
-        });
+        self.upload_complete.set(extracted_or_serialized.is_none());
         // Step 8
         self.send_flag.set(true);
 

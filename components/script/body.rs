@@ -19,9 +19,7 @@ use crate::dom::globalscope::GlobalScope;
 use crate::dom::htmlformelement::{encode_multipart_form_data, generate_boundary};
 use crate::dom::promise::Promise;
 use crate::dom::promisenativehandler::{Callback, PromiseNativeHandler};
-use crate::dom::readablestream::{
-    get_read_promise_bytes, get_read_promise_done, ExternalUnderlyingSource, ReadableStream,
-};
+use crate::dom::readablestream::{get_read_promise_bytes, get_read_promise_done, ReadableStream};
 use crate::dom::urlsearchparams::URLSearchParams;
 use crate::realms::{enter_realm, AlreadyInRealm, InRealm};
 use crate::script_runtime::JSContext;
@@ -303,12 +301,7 @@ impl Extractable for BodyInit {
             BodyInit::ArrayBuffer(ref typedarray) => {
                 let bytes = typedarray.to_vec();
                 let total_bytes = bytes.len();
-                let stream = ReadableStream::new_with_external_underlying_source(
-                    global,
-                    ExternalUnderlyingSource::Memory(total_bytes),
-                );
-                stream.enqueue_native(bytes);
-                stream.close_native();
+                let stream = ReadableStream::new_from_bytes(&global, bytes);
                 Ok(ExtractedBody {
                     stream,
                     total_bytes,
@@ -319,12 +312,7 @@ impl Extractable for BodyInit {
             BodyInit::ArrayBufferView(ref typedarray) => {
                 let bytes = typedarray.to_vec();
                 let total_bytes = bytes.len();
-                let stream = ReadableStream::new_with_external_underlying_source(
-                    global,
-                    ExternalUnderlyingSource::Memory(total_bytes),
-                );
-                stream.enqueue_native(bytes);
-                stream.close_native();
+                let stream = ReadableStream::new_from_bytes(&global, bytes);
                 Ok(ExtractedBody {
                     stream,
                     total_bytes,
@@ -357,12 +345,7 @@ impl Extractable for Vec<u8> {
     fn extract(&self, global: &GlobalScope) -> Fallible<ExtractedBody> {
         let bytes = self.clone();
         let total_bytes = self.len();
-        let stream = ReadableStream::new_with_external_underlying_source(
-            global,
-            ExternalUnderlyingSource::Memory(total_bytes),
-        );
-        stream.enqueue_native(bytes);
-        stream.close_native();
+        let stream = ReadableStream::new_from_bytes(&global, bytes);
         Ok(ExtractedBody {
             stream,
             total_bytes,
@@ -395,12 +378,7 @@ impl Extractable for DOMString {
         let bytes = self.as_bytes().to_owned();
         let total_bytes = bytes.len();
         let content_type = Some(DOMString::from("text/plain;charset=UTF-8"));
-        let stream = ReadableStream::new_with_external_underlying_source(
-            global,
-            ExternalUnderlyingSource::Memory(total_bytes),
-        );
-        stream.enqueue_native(bytes);
-        stream.close_native();
+        let stream = ReadableStream::new_from_bytes(&global, bytes);
         Ok(ExtractedBody {
             stream,
             total_bytes,
@@ -419,12 +397,7 @@ impl Extractable for FormData {
             "multipart/form-data;boundary={}",
             boundary
         )));
-        let stream = ReadableStream::new_with_external_underlying_source(
-            global,
-            ExternalUnderlyingSource::Memory(total_bytes),
-        );
-        stream.enqueue_native(bytes);
-        stream.close_native();
+        let stream = ReadableStream::new_from_bytes(&global, bytes);
         Ok(ExtractedBody {
             stream,
             total_bytes,
@@ -441,12 +414,7 @@ impl Extractable for URLSearchParams {
         let content_type = Some(DOMString::from(
             "application/x-www-form-urlencoded;charset=UTF-8",
         ));
-        let stream = ReadableStream::new_with_external_underlying_source(
-            global,
-            ExternalUnderlyingSource::Memory(total_bytes),
-        );
-        stream.enqueue_native(bytes);
-        stream.close_native();
+        let stream = ReadableStream::new_from_bytes(&global, bytes);
         Ok(ExtractedBody {
             stream,
             total_bytes,
@@ -629,11 +597,7 @@ fn consume_body_with_promise<T: BodyMixin + DomObject>(
     let stream = match object.body() {
         Some(stream) => stream,
         None => {
-            let stream = ReadableStream::new_with_external_underlying_source(
-                &global,
-                ExternalUnderlyingSource::Memory(0),
-            );
-            stream.close_native();
+            let stream = ReadableStream::new_from_bytes(&global, Vec::with_capacity(0));
             stream
         },
     };

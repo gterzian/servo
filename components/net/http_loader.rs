@@ -1455,11 +1455,7 @@ fn http_network_fetch(
         &request.method,
         &request.headers,
         request.body.as_mut().and_then(|body| body.take_stream()),
-        request
-            .body
-            .as_ref()
-            .and_then(|body| Some(body.len()))
-            .unwrap_or(0),
+        request.body.as_ref().map_or(0, |body| body.len()),
         &request.method,
         &request.pipeline_id,
         request.redirect_count + 1,

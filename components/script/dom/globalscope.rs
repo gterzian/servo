@@ -1804,13 +1804,8 @@ impl GlobalScope {
     pub fn get_blob_stream(&self, blob_id: &BlobId) -> DomRoot<ReadableStream> {
         let (file_id, size) = match self.get_blob_bytes_or_file_id(blob_id) {
             (Some(bytes), None) => {
-                let stream = ReadableStream::new_with_external_underlying_source(
-                    self,
-                    ExternalUnderlyingSource::Blob(bytes.len()),
-                );
                 // If we have all the bytes in memory, queue them and close the stream.
-                stream.enqueue_native(bytes);
-                stream.close_native();
+                let stream = ReadableStream::new_from_bytes(self, bytes);
                 return stream;
             },
             (None, Some((id, size))) => (id, size),

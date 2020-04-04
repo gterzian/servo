@@ -99,6 +99,27 @@ pub fn expect_devtools_http_response(
     }
 }
 
+fn create_request_body_with_content(content: Vec<u8>) -> RequestBody {
+    let content_len = content.len();
+
+    let (chunk_request_sender, chunk_request_receiver) = ipc::channel().unwrap();
+    ROUTER.add_route(
+        chunk_request_receiver.to_opaque(),
+        Box::new(move |message| {
+            let request = message.to().unwrap();
+            if let BodyChunkRequest::Connect(sender) = request {
+                let _ = sender.send(content.clone());
+            }
+        }),
+    );
+
+    RequestBody {
+        stream: Some(chunk_request_sender),
+        source: BodySource::USVString,
+        total_bytes: content_len,
+    }
+}
+
 #[test]
 fn test_check_default_headers_loaded_in_every_request() {
     let expected_headers = Arc::new(Mutex::new(None));
@@ -532,24 +553,7 @@ fn test_load_doesnt_send_request_body_on_any_redirect() {
     let (pre_server, pre_url) = make_server(pre_handler);
 
     let content = b"Body on POST!";
-    let content_len = content.len();
-
-    let (chunk_request_sender, chunk_request_receiver) = ipc::channel().unwrap();
-    ROUTER.add_route(
-        chunk_request_receiver.to_opaque(),
-        Box::new(move |message| {
-            let request = message.to().unwrap();
-            if let BodyChunkRequest::Connect(sender) = request {
-                let _ = sender.send(content.to_vec());
-            }
-        }),
-    );
-
-    let request_body = RequestBody {
-        stream: Some(chunk_request_sender),
-        source: BodySource::USVString,
-        total_bytes: content_len,
-    };
+    let request_body = create_request_body_with_content(content.to_vec());
 
     let mut request = RequestBuilder::new(pre_url.clone())
         .body(Some(request_body))
@@ -834,7 +838,6 @@ fn test_when_cookie_received_marked_secure_is_ignored_for_http() {
 #[test]
 fn test_load_sets_content_length_to_length_of_request_body() {
     let content = b"This is a request body";
-    let content_len = content.len();
     let handler = move |request: HyperRequest<Body>, response: &mut HyperResponse<Body>| {
         let content_length = ContentLength(content.len() as u64);
         assert_eq!(
@@ -845,22 +848,7 @@ fn test_load_sets_content_length_to_length_of_request_body() {
     };
     let (server, url) = make_server(handler);
 
-    let (chunk_request_sender, chunk_request_receiver) = ipc::channel().unwrap();
-    ROUTER.add_route(
-        chunk_request_receiver.to_opaque(),
-        Box::new(move |message| {
-            let request = message.to().unwrap();
-            if let BodyChunkRequest::Connect(sender) = request {
-                let _ = sender.send(content.to_vec());
-            }
-        }),
-    );
-
-    let request_body = RequestBody {
-        stream: Some(chunk_request_sender),
-        source: BodySource::USVString,
-        total_bytes: content_len,
-    };
+    let request_body = create_request_body_with_content(content.to_vec());
 
     let mut request = RequestBuilder::new(url.clone())
         .method(Method::POST)
