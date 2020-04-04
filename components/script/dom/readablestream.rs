@@ -326,8 +326,8 @@ unsafe extern "C" fn cancel(
     _cx: *mut JSContext,
     _stream: HandleObject,
     _reason: HandleValue,
-) -> *mut JSVal {
-    ptr::null_mut()
+    _resolve_to: *mut JSVal,
+) {
 }
 
 #[allow(unsafe_code)]
