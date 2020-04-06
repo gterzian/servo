@@ -11,7 +11,7 @@ use crate::dom::bindings::utils::get_dictionary_property;
 use crate::dom::globalscope::GlobalScope;
 use crate::dom::promise::Promise;
 use crate::js::conversions::FromJSValConvertible;
-use crate::realms::{enter_realm, AlreadyInRealm, InRealm};
+use crate::realms::{enter_realm, InRealm};
 use crate::script_runtime::JSContext as SafeJSContext;
 use dom_struct::dom_struct;
 use js::glue::{
@@ -72,14 +72,17 @@ impl ReadableStream {
 
     /// Used from RustCodegen.py
     #[allow(unsafe_code)]
-    pub fn from_js(cx: SafeJSContext, obj: *mut JSObject) -> Result<DomRoot<ReadableStream>, ()> {
+    pub fn from_js(
+        cx: SafeJSContext,
+        obj: *mut JSObject,
+        realm: InRealm,
+    ) -> Result<DomRoot<ReadableStream>, ()> {
         unsafe {
             if !IsReadableStream(obj) {
                 return Err(());
             }
 
-            let in_realm_proof = AlreadyInRealm::assert_for_cx(cx);
-            let global = GlobalScope::from_safe_context(cx, InRealm::Already(&in_realm_proof));
+            let global = GlobalScope::from_safe_context(cx, realm);
 
             let stream = ReadableStream::new(&global, None);
             stream.js_stream.set(UnwrapReadableStream(obj));
