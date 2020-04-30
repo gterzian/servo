@@ -264,11 +264,7 @@ impl ServiceWorkerGlobalScope {
         } = scope_things;
 
         let serialized_worker_url = script_url.to_string();
-        let origin = GlobalScope::current()
-            .expect("No current global object")
-            .origin()
-            .immutable()
-            .clone();
+        let origin = scope_url.origin();
         thread::Builder::new()
             .name(format!("ServiceWorker for {}", serialized_worker_url))
             .spawn(move || {
