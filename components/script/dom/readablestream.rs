@@ -6,7 +6,7 @@ use crate::dom::bindings::conversions::{ConversionBehavior, ConversionResult};
 use crate::dom::bindings::error::Error;
 use crate::dom::bindings::reflector::{reflect_dom_object, DomObject, Reflector};
 use crate::dom::bindings::root::DomRoot;
-use crate::dom::bindings::settings_stack::AutoIncumbentScript;
+use crate::dom::bindings::settings_stack::AutoEntryScript;
 use crate::dom::bindings::utils::get_dictionary_property;
 use crate::dom::globalscope::GlobalScope;
 use crate::dom::promise::Promise;
@@ -236,7 +236,7 @@ impl ReadableStream {
 
         let global = self.global();
         let _ar = enter_realm(&*global);
-        let _ais = AutoIncumbentScript::new(&*global);
+        let _aes = AutoEntryScript::new(&*global);
 
         let cx = global.get_cx();
 

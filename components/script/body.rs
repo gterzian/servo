@@ -121,10 +121,6 @@ impl TransmitBodyConnectHandler {
                     return;
                 }
 
-                let _realm = enter_realm(&*global);
-                AlreadyInRealm::assert(&*global);
-                let _ais = AutoIncumbentScript::new(&*global);
-
                 // Step 4, the result of reading a chunk from body’s stream with reader.
                 let promise = rooted_stream.read_a_chunk();
 
@@ -140,6 +136,12 @@ impl TransmitBodyConnectHandler {
                 let rejection_handler = Box::new(TransmitBodyPromiseRejectionHandler {stream: rooted_stream});
 
                 let handler = PromiseNativeHandler::new(&global, Some(promise_handler), Some(rejection_handler));
+
+                // Enter a realm, and a script,
+                // before appending the native handler.
+                let _realm = enter_realm(&*global);
+                AlreadyInRealm::assert(&*global);
+                let _ais = AutoIncumbentScript::new(&*global);
                 promise.append_native_handler(&handler);
             }),
             &self.canceller,
@@ -535,9 +537,6 @@ impl Callback for ConsumeBodyPromiseHandler {
             bytes.extend_from_slice(&*chunk);
 
             let global = stream.global();
-            let _realm = enter_realm(&*global);
-            AlreadyInRealm::assert(&*global);
-            let _ais = AutoIncumbentScript::new(&*global);
 
             // Run the above step again.
             let read_promise = stream.read_a_chunk();
@@ -556,6 +555,12 @@ impl Callback for ConsumeBodyPromiseHandler {
 
             let handler =
                 PromiseNativeHandler::new(&global, Some(promise_handler), Some(rejection_handler));
+
+            // Enter a realm, and a script,
+            // before appending the native handler.
+            let _realm = enter_realm(&*global);
+            AlreadyInRealm::assert(&*global);
+            let _ais = AutoIncumbentScript::new(&*global);
             read_promise.append_native_handler(&handler);
         }
     }
@@ -566,7 +571,6 @@ impl Callback for ConsumeBodyPromiseHandler {
 pub fn consume_body<T: BodyMixin + DomObject>(object: &T, body_type: BodyType) -> Rc<Promise> {
     let global = object.global();
     let in_realm_proof = AlreadyInRealm::assert(&global);
-    let _ais = AutoIncumbentScript::new(&global);
     let promise =
         Promise::new_in_current_realm(&object.global(), InRealm::Already(&in_realm_proof));
 
@@ -591,7 +595,6 @@ fn consume_body_with_promise<T: BodyMixin + DomObject>(
     promise: Rc<Promise>,
 ) {
     let global = object.global();
-    let _ais = AutoIncumbentScript::new(&global);
 
     // Step 2.
     let stream = match object.body() {
@@ -634,6 +637,7 @@ fn consume_body_with_promise<T: BodyMixin + DomObject>(
         Some(promise_handler),
         Some(rejection_handler),
     );
+    // We are already in a realm and a script.
     read_promise.append_native_handler(&handler);
 }
 
