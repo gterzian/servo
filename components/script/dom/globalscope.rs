@@ -489,7 +489,7 @@ impl MessageListener {
 }
 
 /// Callback used to enqueue file chunks to streams as part of FileListener.
-fn stream_handle_incoming(stream: DomRoot<ReadableStream>, bytes: Result<Vec<u8>, Error>) {
+fn stream_handle_incoming(stream: &ReadableStream, bytes: Result<Vec<u8>, Error>) {
     match bytes {
         Ok(b) => {
             stream.enqueue_native(b);
@@ -501,7 +501,7 @@ fn stream_handle_incoming(stream: DomRoot<ReadableStream>, bytes: Result<Vec<u8>
 }
 
 /// Callback used to close streams as part of FileListener.
-fn stream_handle_eof(stream: DomRoot<ReadableStream>) {
+fn stream_handle_eof(stream: &ReadableStream) {
     stream.close_native();
 }
 
@@ -512,11 +512,10 @@ impl FileListener {
                 Some(FileListenerState::Empty(callback, target)) => {
                     let bytes = if let FileListenerTarget::Stream(ref trusted_stream) = target {
                         let trusted = trusted_stream.clone();
-                        let callback = Box::new(stream_handle_incoming);
 
                         let task = task!(enqueue_stream_chunk: move || {
                             let stream = trusted.root();
-                            callback(stream, Ok(blob_buf.bytes));
+                            stream_handle_incoming(&*stream, Ok(blob_buf.bytes));
                         });
 
                         let _ = self
@@ -537,11 +536,10 @@ impl FileListener {
                 Some(FileListenerState::Receiving(mut bytes, callback, target)) => {
                     if let FileListenerTarget::Stream(ref trusted_stream) = target {
                         let trusted = trusted_stream.clone();
-                        let callback = Box::new(stream_handle_incoming);
 
                         let task = task!(enqueue_stream_chunk: move || {
                             let stream = trusted.root();
-                            callback(stream, Ok(bytes_in));
+                            stream_handle_incoming(&*stream, Ok(bytes_in));
                         });
 
                         let _ = self
@@ -576,11 +574,10 @@ impl FileListener {
                     },
                     FileListenerTarget::Stream(trusted_stream) => {
                         let trusted = trusted_stream.clone();
-                        let callback = Box::new(stream_handle_eof);
 
                         let task = task!(enqueue_stream_chunk: move || {
                             let stream = trusted.root();
-                            callback(stream);
+                            stream_handle_eof(&*stream);
                         });
 
                         let _ = self
@@ -613,11 +610,10 @@ impl FileListener {
                             );
                         },
                         FileListenerTarget::Stream(trusted_stream) => {
-                            let callback = Box::new(stream_handle_incoming);
                             let _ = self.task_source.queue_with_canceller(
                                 task!(error_stream: move || {
                                     let stream = trusted_stream.root();
-                                    callback(stream, error);
+                                    stream_handle_incoming(&*stream, error);
                                 }),
                                 &self.task_canceller,
                             );
