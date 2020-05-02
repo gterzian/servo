@@ -35,6 +35,16 @@ use std::os::raw::c_void;
 use std::ptr::{self, NonNull};
 use std::rc::Rc;
 
+static UNDERLYING_SOURCE_TRAPS: ReadableStreamUnderlyingSourceTraps =
+    ReadableStreamUnderlyingSourceTraps {
+        requestData: Some(request_data),
+        writeIntoReadRequestBuffer: Some(write_into_read_request_buffer),
+        cancel: Some(cancel),
+        onClosed: Some(close),
+        onErrored: Some(error),
+        finalize: Some(finalize),
+    };
+
 #[dom_struct]
 pub struct ReadableStream {
     reflector_: Reflector,
@@ -116,17 +126,8 @@ impl ReadableStream {
         let stream = ReadableStream::new(&global, Some(source.clone()));
 
         unsafe {
-            let mut traps = ReadableStreamUnderlyingSourceTraps {
-                requestData: Some(request_data),
-                writeIntoReadRequestBuffer: Some(write_into_read_request_buffer),
-                cancel: Some(cancel),
-                onClosed: Some(close),
-                onErrored: Some(error),
-                finalize: Some(finalize),
-            };
-
             let js_wrapper = CreateReadableStreamUnderlyingSource(
-                &mut traps,
+                &UNDERLYING_SOURCE_TRAPS,
                 &*source as *const _ as *const c_void,
             );
 
@@ -134,7 +135,7 @@ impl ReadableStream {
                 let js_stream = NewReadableExternalSourceStreamObject(
                     *cx,
                     js_wrapper,
-                    ptr::null_mut() as *mut c_void,
+                    ptr::null_mut(),
                     HandleObject::null(),
                 )
             );
