@@ -361,7 +361,7 @@ impl ResponseMethods for Response {
 
     /// <https://fetch.spec.whatwg.org/#dom-body-body>
     fn GetBody(&self, _cx: SafeJSContext) -> Option<NonNull<JSObject>> {
-        self.body().and_then(|stream| Some(stream.get_js_stream()))
+        self.body().map(|stream| stream.get_js_stream())
     }
 
     // https://fetch.spec.whatwg.org/#dom-body-text
