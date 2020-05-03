@@ -402,7 +402,7 @@ fn obtain_response(
             // Request the first chunk, corresponding to Step 3 and 4.
             let _ = chunk_requester.send(BodyChunkRequest::Chunk);
 
-            let devtools_bytes = StdArc::downgrade(&devtools_bytes);
+            let devtools_bytes = devtools_bytes.clone();
 
             ROUTER.add_route(
                 body_port.to_opaque(),
@@ -411,9 +411,7 @@ fn obtain_response(
                     let chunk_requester = chunk_requester.clone();
                     let sender = sender.clone();
 
-                    if let Some(devtools_bytes) = devtools_bytes.upgrade() {
-                        devtools_bytes.lock().unwrap().append(&mut bytes.clone());
-                    }
+                    devtools_bytes.lock().unwrap().append(&mut bytes.clone());
 
                     HANDLE.lock().unwrap().spawn(
                         // Step 5.1.2.2
@@ -513,18 +511,12 @@ fn obtain_response(
 
                 let msg = if let Some(request_id) = request_id {
                     if let Some(pipeline_id) = pipeline_id {
-                        let devtools_bytes = StdArc::try_unwrap(devtools_bytes)
-                            .expect("Couldn't unwrap arc to devtool bytes.");
                         Some(prepare_devtools_request(
                             request_id,
                             closure_url,
                             method.clone(),
                             headers,
-                            Some(
-                                devtools_bytes
-                                    .into_inner()
-                                    .expect("Failed to get devtools request bytes."),
-                            ),
+                            Some(devtools_bytes.lock().unwrap().clone()),
                             pipeline_id,
                             time::now(),
                             connect_end - connect_start,
