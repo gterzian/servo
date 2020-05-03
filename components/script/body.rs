@@ -360,10 +360,11 @@ impl Extractable for Vec<u8> {
 
 impl Extractable for Blob {
     fn extract(&self, _global: &GlobalScope) -> Fallible<ExtractedBody> {
-        let content_type = if self.Type().as_ref().is_empty() {
+        let blob_type = self.Type();
+        let content_type = if blob_type.as_ref().is_empty() {
             None
         } else {
-            Some(self.Type())
+            Some(blob_type)
         };
         let total_bytes = self.Size() as usize;
         Ok(ExtractedBody {
