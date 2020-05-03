@@ -34,6 +34,7 @@ use std::cell::{Cell, RefCell};
 use std::os::raw::c_void;
 use std::ptr::{self, NonNull};
 use std::rc::Rc;
+use std::slice;
 
 static UNDERLYING_SOURCE_TRAPS: ReadableStreamUnderlyingSourceTraps =
     ReadableStreamUnderlyingSourceTraps {
@@ -82,23 +83,21 @@ impl ReadableStream {
 
     /// Used from RustCodegen.py
     #[allow(unsafe_code)]
-    pub fn from_js(
+    pub unsafe fn from_js(
         cx: SafeJSContext,
         obj: *mut JSObject,
         realm: InRealm,
     ) -> Result<DomRoot<ReadableStream>, ()> {
-        unsafe {
-            if !IsReadableStream(obj) {
-                return Err(());
-            }
-
-            let global = GlobalScope::from_safe_context(cx, realm);
-
-            let stream = ReadableStream::new(&global, None);
-            stream.js_stream.set(UnwrapReadableStream(obj));
-
-            Ok(stream)
+        if !IsReadableStream(obj) {
+            return Err(());
         }
+
+        let global = GlobalScope::from_safe_context(cx, realm);
+
+        let stream = ReadableStream::new(&global, None);
+        stream.js_stream.set(UnwrapReadableStream(obj));
+
+        Ok(stream)
     }
 
     /// Build a stream backed by a Rust source that has already been read into memory.
@@ -158,12 +157,12 @@ impl ReadableStream {
         let _ar = enter_realm(&*global);
         let cx = global.get_cx();
 
-        let stream_handle = unsafe { self.js_stream.handle() };
+        let handle = unsafe { self.js_stream.handle() };
 
         self.external_underlying_source
             .as_ref()
             .expect("No external source to enqueue bytes.")
-            .enqueue_chunk(cx, stream_handle, bytes);
+            .enqueue_chunk(cx, handle, bytes);
     }
 
     #[allow(unsafe_code)]
@@ -210,11 +209,9 @@ impl ReadableStream {
         let cx = global.get_cx();
 
         unsafe {
-            rooted!(in(*cx) let stream = self.js_stream.get());
-
             rooted!(in(*cx) let reader = ReadableStreamGetReader(
                 *cx,
-                stream.handle().into_handle(),
+                self.js_stream.handle(),
                 ReadableStreamReaderMode::Default,
             ));
 
@@ -283,8 +280,7 @@ impl ReadableStream {
         let mut locked_or_disturbed = false;
 
         unsafe {
-            rooted!(in(*cx) let stream = self.js_stream.get());
-            ReadableStreamIsLocked(*cx, stream.handle().into_handle(), &mut locked_or_disturbed);
+            ReadableStreamIsLocked(*cx, self.js_stream.handle(), &mut locked_or_disturbed);
         }
 
         locked_or_disturbed
@@ -297,8 +293,7 @@ impl ReadableStream {
         let mut locked_or_disturbed = false;
 
         unsafe {
-            rooted!(in(*cx) let stream = self.js_stream.get());
-            ReadableStreamIsDisturbed(*cx, stream.handle().into_handle(), &mut locked_or_disturbed);
+            ReadableStreamIsDisturbed(*cx, self.js_stream.handle(), &mut locked_or_disturbed);
         }
 
         locked_or_disturbed
@@ -319,20 +314,18 @@ unsafe extern "C" fn request_data(
 #[allow(unsafe_code)]
 unsafe extern "C" fn write_into_read_request_buffer(
     source: *const c_void,
-    cx: *mut JSContext,
-    stream: HandleObject,
+    _cx: *mut JSContext,
+    _stream: HandleObject,
     buffer: *mut c_void,
     length: usize,
     bytes_written: *mut usize,
 ) {
     let source = &*(source as *const ExternalUnderlyingSourceController);
-    source.write_into_buffer(
-        SafeJSContext::from_ptr(cx),
-        stream,
-        buffer,
-        length,
-        bytes_written,
-    );
+    let slice = slice::from_raw_parts_mut(buffer as *mut u8, length);
+    source.write_into_buffer(slice);
+
+    // Currently we're always able to completely fulfill the write request.
+    *bytes_written = length;
 }
 
 #[allow(unsafe_code)]
@@ -378,7 +371,7 @@ struct ExternalUnderlyingSourceController {
     /// <https://streams.spec.whatwg.org/#internal-queues>
     buffer: RefCell<Vec<u8>>,
     /// Has the stream been closed by native code?
-    closed: RefCell<bool>,
+    closed: Cell<bool>,
 }
 
 impl ExternalUnderlyingSourceController {
@@ -391,7 +384,7 @@ impl ExternalUnderlyingSourceController {
         };
         ExternalUnderlyingSourceController {
             buffer: RefCell::new(buffer),
-            closed: RefCell::new(false),
+            closed: Cell::new(false),
         }
     }
 
@@ -432,14 +425,15 @@ impl ExternalUnderlyingSourceController {
     }
 
     fn close(&self, cx: SafeJSContext, stream: HandleObject) {
-        *self.closed.borrow_mut() = true;
+        self.closed.set(true);
         self.maybe_close_js_stream(cx, stream);
     }
 
     fn enqueue_chunk(&self, cx: SafeJSContext, stream: HandleObject, mut chunk: Vec<u8>) {
         let available = {
             let mut buffer = self.buffer.borrow_mut();
-            buffer.append(&mut chunk);
+            chunk.append(&mut buffer);
+            *buffer = chunk;
             buffer.len()
         };
         self.maybe_signal_available_bytes(cx, stream, available);
@@ -450,7 +444,7 @@ impl ExternalUnderlyingSourceController {
         // Note: for pull sources,
         // this would be the time to ask for a chunk.
 
-        if { *self.closed.borrow() } {
+        if self.closed.get() {
             return self.maybe_close_js_stream(cx, stream);
         }
 
@@ -469,21 +463,10 @@ impl ExternalUnderlyingSourceController {
         buffer.split_off(buffer_len - length)
     }
 
-    #[allow(unsafe_code)]
-    fn write_into_buffer(
-        &self,
-        _cx: SafeJSContext,
-        _stream: HandleObject,
-        buffer: *mut c_void,
-        length: usize,
-        bytes_written: *mut usize,
-    ) {
+    fn write_into_buffer(&self, dest: &mut [u8]) {
+        let length = dest.len();
         let chunk = self.get_chunk_with_length(length);
-
-        unsafe {
-            *bytes_written = chunk.len();
-            ptr::copy_nonoverlapping(chunk.as_ptr(), buffer as *mut u8, chunk.len());
-        }
+        dest.copy_from_slice(chunk.as_slice());
     }
 }
 
