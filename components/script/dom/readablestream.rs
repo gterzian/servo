@@ -476,19 +476,15 @@ pub fn get_read_promise_done(cx: SafeJSContext, v: &SafeHandleValue) -> Result<b
     unsafe {
         rooted!(in(*cx) let object = v.to_object());
         rooted!(in(*cx) let mut done = UndefinedValue());
-        let has_done =
-            get_dictionary_property(*cx, object.handle(), "done", done.handle_mut()).is_ok();
-
-        if !has_done {
-            return Err(Error::Type("".to_string()));
+        match get_dictionary_property(*cx, object.handle(), "done", done.handle_mut()) {
+            Ok(true) => match bool::from_jsval(*cx, done.handle(), ()) {
+                Ok(ConversionResult::Success(val)) => Ok(val),
+                Ok(ConversionResult::Failure(error)) => Err(Error::Type(error.to_string())),
+                _ => Err(Error::Type("Unknown format for done property.".to_string())),
+            },
+            Ok(false) => Err(Error::Type("Promise has no done property.".to_string())),
+            Err(()) => Err(Error::JSFailed),
         }
-
-        let is_done = match bool::from_jsval(*cx, done.handle(), ()) {
-            Ok(ConversionResult::Success(val)) => val,
-            _ => panic!("Couldn't convert jsval to boolean"),
-        };
-
-        Ok(is_done)
     }
 }
 
@@ -498,18 +494,16 @@ pub fn get_read_promise_bytes(cx: SafeJSContext, v: &SafeHandleValue) -> Result<
     unsafe {
         rooted!(in(*cx) let object = v.to_object());
         rooted!(in(*cx) let mut bytes = UndefinedValue());
-        let has_value =
-            get_dictionary_property(*cx, object.handle(), "value", bytes.handle_mut()).is_ok();
-
-        if !has_value {
-            return Err(Error::Type("".to_string()));
+        match get_dictionary_property(*cx, object.handle(), "value", bytes.handle_mut()) {
+            Ok(true) => {
+                match Vec::<u8>::from_jsval(*cx, bytes.handle(), ConversionBehavior::EnforceRange) {
+                    Ok(ConversionResult::Success(val)) => Ok(val),
+                    Ok(ConversionResult::Failure(error)) => Err(Error::Type(error.to_string())),
+                    _ => Err(Error::Type("Unknown format for bytes read.".to_string())),
+                }
+            },
+            Ok(false) => Err(Error::Type("Promise has no value property.".to_string())),
+            Err(()) => Err(Error::JSFailed),
         }
-
-        let chunk =
-            match Vec::<u8>::from_jsval(*cx, bytes.handle(), ConversionBehavior::EnforceRange) {
-                Ok(ConversionResult::Success(val)) => val,
-                _ => return Err(Error::Type("".to_string())),
-            };
-        Ok(chunk)
     }
 }
