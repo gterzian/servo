@@ -953,7 +953,7 @@ fn http_network_or_cache_fetch(
             _ => None,
         },
         // Step 5.6
-        Some(ref http_request_body) => Some(http_request_body.len() as u64),
+        Some(ref http_request_body) => http_request_body.len().map(|size| size as u64),
     };
 
     // Step 5.7
@@ -1447,7 +1447,10 @@ fn http_network_fetch(
         &request.method,
         &request.headers,
         request.body.as_mut().and_then(|body| body.take_stream()),
-        request.body.as_ref().map_or(0, |body| body.len()),
+        request
+            .body
+            .as_ref()
+            .map_or(0, |body| body.len().unwrap_or(0)),
         &request.method,
         &request.pipeline_id,
         request.redirect_count + 1,

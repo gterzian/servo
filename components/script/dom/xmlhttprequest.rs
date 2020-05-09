@@ -574,7 +574,7 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
                 let stream = ReadableStream::new_from_bytes(&global, bytes);
                 Some(ExtractedBody {
                     stream,
-                    total_bytes,
+                    total_bytes: Some(total_bytes),
                     content_type: Some(DOMString::from(content_type)),
                     source: BodySource::Null,
                 })
@@ -602,7 +602,7 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
                 let stream = ReadableStream::new_from_bytes(&global, bytes);
                 Some(ExtractedBody {
                     stream,
-                    total_bytes,
+                    total_bytes: Some(total_bytes),
                     content_type: None,
                     source: BodySource::BufferSource,
                 })
@@ -614,7 +614,7 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
                 let stream = ReadableStream::new_from_bytes(&global, bytes);
                 Some(ExtractedBody {
                     stream,
-                    total_bytes,
+                    total_bytes: Some(total_bytes),
                     content_type: None,
                     source: BodySource::BufferSource,
                 })
@@ -631,7 +631,7 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
 
                 Some(ExtractedBody {
                     stream: stream.clone(),
-                    total_bytes: 0,
+                    total_bytes: None,
                     content_type: None,
                     source: BodySource::Null,
                 })
@@ -642,7 +642,7 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
         self.request_body_len.set(
             extracted_or_serialized
                 .as_ref()
-                .map_or(0, |e| e.total_bytes),
+                .map_or(0, |e| e.total_bytes.unwrap_or(0)),
         );
 
         // todo preserved headers?

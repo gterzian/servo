@@ -217,7 +217,7 @@ impl Callback for TransmitBodyPromiseRejectionHandler {
 pub struct ExtractedBody {
     pub stream: DomRoot<ReadableStream>,
     pub source: BodySource,
-    pub total_bytes: usize,
+    pub total_bytes: Option<usize>,
     pub content_type: Option<DOMString>,
 }
 
@@ -306,7 +306,7 @@ impl Extractable for BodyInit {
                 let stream = ReadableStream::new_from_bytes(&global, bytes);
                 Ok(ExtractedBody {
                     stream,
-                    total_bytes,
+                    total_bytes: Some(total_bytes),
                     content_type: None,
                     source: BodySource::BufferSource,
                 })
@@ -317,7 +317,7 @@ impl Extractable for BodyInit {
                 let stream = ReadableStream::new_from_bytes(&global, bytes);
                 Ok(ExtractedBody {
                     stream,
-                    total_bytes,
+                    total_bytes: Some(total_bytes),
                     content_type: None,
                     source: BodySource::BufferSource,
                 })
@@ -334,7 +334,7 @@ impl Extractable for BodyInit {
 
                 Ok(ExtractedBody {
                     stream: stream.clone(),
-                    total_bytes: 0,
+                    total_bytes: None,
                     content_type: None,
                     source: BodySource::Null,
                 })
@@ -350,7 +350,7 @@ impl Extractable for Vec<u8> {
         let stream = ReadableStream::new_from_bytes(&global, bytes);
         Ok(ExtractedBody {
             stream,
-            total_bytes,
+            total_bytes: Some(total_bytes),
             content_type: None,
             // A vec is used only in `submit_entity_body`.
             source: BodySource::FormData,
@@ -369,7 +369,7 @@ impl Extractable for Blob {
         let total_bytes = self.Size() as usize;
         Ok(ExtractedBody {
             stream: self.get_stream(),
-            total_bytes,
+            total_bytes: Some(total_bytes),
             content_type,
             source: BodySource::Blob,
         })
@@ -384,7 +384,7 @@ impl Extractable for DOMString {
         let stream = ReadableStream::new_from_bytes(&global, bytes);
         Ok(ExtractedBody {
             stream,
-            total_bytes,
+            total_bytes: Some(total_bytes),
             content_type,
             source: BodySource::USVString,
         })
@@ -403,7 +403,7 @@ impl Extractable for FormData {
         let stream = ReadableStream::new_from_bytes(&global, bytes);
         Ok(ExtractedBody {
             stream,
-            total_bytes,
+            total_bytes: Some(total_bytes),
             content_type,
             source: BodySource::FormData,
         })
@@ -420,7 +420,7 @@ impl Extractable for URLSearchParams {
         let stream = ReadableStream::new_from_bytes(&global, bytes);
         Ok(ExtractedBody {
             stream,
-            total_bytes,
+            total_bytes: Some(total_bytes),
             content_type,
             source: BodySource::URLSearchParams,
         })

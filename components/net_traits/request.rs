@@ -146,7 +146,7 @@ pub struct RequestBody {
     /// <https://fetch.spec.whatwg.org/#concept-body-source>
     pub source: BodySource,
     /// <https://fetch.spec.whatwg.org/#concept-body-total-bytes>
-    pub total_bytes: usize,
+    pub total_bytes: Option<usize>,
 }
 
 impl RequestBody {
@@ -161,8 +161,8 @@ impl RequestBody {
         false
     }
 
-    pub fn len(&self) -> usize {
-        self.total_bytes
+    pub fn len(&self) -> Option<usize> {
+        self.total_bytes.clone()
     }
 }
 
