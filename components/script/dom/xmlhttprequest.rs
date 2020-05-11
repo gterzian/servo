@@ -1261,6 +1261,7 @@ impl XMLHttpRequest {
         };
         progressevent.upcast::<Event>().fire(target);
     }
+
     fn dispatch_upload_progress_event(&self, type_: Atom, partial_load: Result<Option<u64>, ()>) {
         // If partial_load is Ok(None), loading has completed and we can just use the value from the request body
         // If an error occured, we pass 0 for both loaded and total
