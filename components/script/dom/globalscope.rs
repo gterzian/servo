@@ -312,6 +312,14 @@ pub enum BlobState {
     UnManaged,
 }
 
+/// The result of looking-up the data for a Blob,
+/// containing either the in-memory bytes,
+/// or the file-id.
+enum BlobResult {
+    Bytes(Vec<u8>),
+    File(Uuid, usize),
+}
+
 /// Data representing a message-port managed by this global.
 #[derive(JSTraceable, MallocSizeOf)]
 #[unrooted_must_root_lint::must_root]
@@ -1528,10 +1536,7 @@ impl GlobalScope {
     /// Note: this is almost a duplicate of `get_blob_bytes`,
     /// tweaked for integration with streams.
     /// TODO: merge with `get_blob_bytes` by way of broader integration with blob streams.
-    pub fn get_blob_bytes_or_file_id(
-        &self,
-        blob_id: &BlobId,
-    ) -> (Option<Vec<u8>>, Option<(Uuid, u64)>) {
+    fn get_blob_bytes_or_file_id(&self, blob_id: &BlobId) -> BlobResult {
         let parent = {
             let blob_state = self.blob_state.borrow();
             if let BlobState::Managed(blobs_map) = &*blob_state {
@@ -1552,9 +1557,9 @@ impl GlobalScope {
         match parent {
             Some((parent_id, rel_pos)) => {
                 match self.get_blob_bytes_non_sliced_or_file_id(&parent_id) {
-                    (Some(v), None) => {
-                        let range = rel_pos.to_abs_range(v.len());
-                        return (Some(v.index(range).to_vec()), None);
+                    BlobResult::Bytes(bytes) => {
+                        let range = rel_pos.to_abs_range(bytes.len());
+                        BlobResult::Bytes(bytes.index(range).to_vec())
                     },
                     res => res,
                 }
@@ -1568,10 +1573,7 @@ impl GlobalScope {
     /// Note: this is almost a duplicate of `get_blob_bytes_non_sliced`,
     /// tweaked for integration with streams.
     /// TODO: merge with `get_blob_bytes` by way of broader integration with blob streams.
-    fn get_blob_bytes_non_sliced_or_file_id(
-        &self,
-        blob_id: &BlobId,
-    ) -> (Option<Vec<u8>>, Option<(Uuid, u64)>) {
+    fn get_blob_bytes_non_sliced_or_file_id(&self, blob_id: &BlobId) -> BlobResult {
         let blob_state = self.blob_state.borrow();
         if let BlobState::Managed(blobs_map) = &*blob_state {
             let blob_info = blobs_map
@@ -1579,10 +1581,10 @@ impl GlobalScope {
                 .expect("get_blob_bytes_non_sliced_or_file_id called for a unknown blob.");
             match blob_info.blob_impl.blob_data() {
                 BlobData::File(ref f) => match f.get_cache() {
-                    Some(bytes) => (Some(bytes.clone()), None),
-                    None => (None, Some((f.get_id(), f.get_size()))),
+                    Some(bytes) => BlobResult::Bytes(bytes.clone()),
+                    None => BlobResult::File(f.get_id(), f.get_size() as usize),
                 },
-                BlobData::Memory(ref s) => (Some(s.clone()), None),
+                BlobData::Memory(ref s) => BlobResult::Bytes(s.clone()),
                 BlobData::Sliced(_, _) => panic!("This blob doesn't have a parent."),
             }
         } else {
@@ -1799,13 +1801,12 @@ impl GlobalScope {
     /// <https://w3c.github.io/FileAPI/#blob-get-stream>
     pub fn get_blob_stream(&self, blob_id: &BlobId) -> DomRoot<ReadableStream> {
         let (file_id, size) = match self.get_blob_bytes_or_file_id(blob_id) {
-            (Some(bytes), None) => {
+            BlobResult::Bytes(bytes) => {
                 // If we have all the bytes in memory, queue them and close the stream.
                 let stream = ReadableStream::new_from_bytes(self, bytes);
                 return stream;
             },
-            (None, Some((id, size))) => (id, size),
-            _ => panic!("get_blob_stream called on a global not managing the blob."),
+            BlobResult::File(id, size) => (id, size),
         };
 
         let stream = ReadableStream::new_with_external_underlying_source(
