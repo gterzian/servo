@@ -1960,12 +1960,8 @@ impl GlobalScope {
 
     /// Returns the global scope for the given SafeJSContext
     #[allow(unsafe_code)]
-    pub fn from_safe_context(cx: SafeJSContext, _realm: InRealm) -> DomRoot<Self> {
-        unsafe {
-            let global = CurrentGlobalOrNull(*cx);
-            assert!(!global.is_null());
-            global_scope_from_global(global, *cx)
-        }
+    pub fn from_safe_context(cx: SafeJSContext, realm: InRealm) -> DomRoot<Self> {
+        unsafe { Self::from_context(*cx, realm) }
     }
 
     /// Returns the global object of the realm that the given JS object
