@@ -269,6 +269,7 @@ impl ServiceWorkerGlobalScope {
             .name(format!("ServiceWorker for {}", serialized_worker_url))
             .spawn(move || {
                 thread_state::initialize(ThreadState::SCRIPT | ThreadState::IN_WORKER);
+                let runtime = new_rt_and_cx(None);
                 let roots = RootCollection::new();
                 let _stack_roots = ThreadLocalStackRoots::new(&roots);
 
@@ -290,34 +291,19 @@ impl ServiceWorkerGlobalScope {
                     .referrer_policy(referrer_policy)
                     .origin(origin);
 
-                let (url, source) = match load_whole_resource(
-                    request,
-                    &init.resource_threads.sender(),
-                    &GlobalScope::current().expect("No current global object"),
-                ) {
-                    Err(_) => {
-                        println!("error loading script {}", serialized_worker_url);
-                        return;
-                    },
-                    Ok((metadata, bytes)) => {
-                        (metadata.final_url, String::from_utf8(bytes).unwrap())
-                    },
-                };
-
-                let runtime = new_rt_and_cx(None);
-
-                let (devtools_mpsc_chan, devtools_mpsc_port) = unbounded();
-                ROUTER
-                    .route_ipc_receiver_to_crossbeam_sender(devtools_receiver, devtools_mpsc_chan);
-
                 // Service workers are time limited
                 // https://w3c.github.io/ServiceWorker/#service-worker-lifetime
                 let sw_lifetime_timeout = pref!(dom.serviceworker.timeout_seconds) as u64;
                 let time_out_port = after(Duration::new(sw_lifetime_timeout, 0));
 
+                let (devtools_mpsc_chan, devtools_mpsc_port) = unbounded();
+                ROUTER
+                    .route_ipc_receiver_to_crossbeam_sender(devtools_receiver, devtools_mpsc_chan);
+
+                let resource_threads_sender = init.resource_threads.sender();
                 let global = ServiceWorkerGlobalScope::new(
                     init,
-                    url,
+                    script_url,
                     devtools_mpsc_port,
                     runtime,
                     own_sender,
@@ -326,6 +312,19 @@ impl ServiceWorkerGlobalScope {
                     swmanager_sender,
                     scope_url,
                 );
+
+                let (_url, source) =
+                    match load_whole_resource(request, &resource_threads_sender, &*global.upcast())
+                    {
+                        Err(_) => {
+                            println!("error loading script {}", serialized_worker_url);
+                            return;
+                        },
+                        Ok((metadata, bytes)) => {
+                            (metadata.final_url, String::from_utf8(bytes).unwrap())
+                        },
+                    };
+
                 let scope = global.upcast::<WorkerGlobalScope>();
 
                 unsafe {
