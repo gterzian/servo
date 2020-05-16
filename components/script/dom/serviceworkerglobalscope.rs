@@ -347,7 +347,7 @@ impl ServiceWorkerGlobalScope {
                             // until the event loop is destroyed,
                             // which happens after the closing flag is set to true,
                             // or until the worker has run beyond its allocated time.
-                            while !scope.is_closing() || !global.has_timed_out() {
+                            while !scope.is_closing() && !global.has_timed_out() {
                                 run_worker_event_loop(&*global, None);
                             }
                         },
@@ -355,6 +355,7 @@ impl ServiceWorkerGlobalScope {
                         scope.script_chan(),
                         CommonScriptMsg::CollectReports,
                     );
+                scope.clear_js_runtime();
             })
             .expect("Thread spawning failed");
     }
@@ -382,7 +383,8 @@ impl ServiceWorkerGlobalScope {
 
     fn has_timed_out(&self) -> bool {
         // TODO: https://w3c.github.io/ServiceWorker/#service-worker-lifetime
-        false
+        // Immeditaly stop the event-loop after executing the initial script.
+        true
     }
 
     fn handle_script_event(&self, msg: ServiceWorkerScriptMsg) {
