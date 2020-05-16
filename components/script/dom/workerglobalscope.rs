@@ -155,7 +155,8 @@ impl WorkerGlobalScope {
     }
 
     pub fn clear_js_runtime(&self) {
-        *self.runtime.borrow_mut() = None;
+        let runtime = self.runtime.borrow_mut().take();
+        drop(runtime);
     }
 
     pub fn runtime_handle(&self) -> ParentRuntime {
