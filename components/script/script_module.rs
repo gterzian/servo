@@ -15,7 +15,6 @@ use crate::dom::bindings::inheritance::Castable;
 use crate::dom::bindings::refcounted::{Trusted, TrustedPromise};
 use crate::dom::bindings::reflector::DomObject;
 use crate::dom::bindings::root::DomRoot;
-use crate::dom::bindings::settings_stack::AutoIncumbentScript;
 use crate::dom::bindings::str::DOMString;
 use crate::dom::bindings::trace::RootedTraceableBox;
 use crate::dom::document::Document;
@@ -329,13 +328,12 @@ impl ModuleTree {
             ))),
         );
 
-        let _realm = enter_realm(&*owner.global());
-        AlreadyInRealm::assert(&*owner.global());
-        let _ais = AutoIncumbentScript::new(&*owner.global());
+        let realm = enter_realm(&*owner.global());
+        let comp = InRealm::Entered(&realm);
 
         let promise = promise.as_ref().unwrap();
 
-        promise.append_native_handler(&handler);
+        promise.append_native_handler(&handler, comp);
     }
 }
 
@@ -735,11 +733,10 @@ impl ModuleOwner {
 
         let realm = enter_realm(&*self.global());
         let comp = InRealm::Entered(&realm);
-        let _ais = AutoIncumbentScript::new(&*self.global());
 
         let promise = Promise::new_in_current_realm(&self.global(), comp);
 
-        promise.append_native_handler(&handler);
+        promise.append_native_handler(&handler, comp);
 
         promise
     }
@@ -1339,9 +1336,8 @@ fn fetch_module_descendants_and_link(
                 unsafe {
                     let global = owner.global();
 
-                    let _realm = enter_realm(&*global);
-                    AlreadyInRealm::assert(&*global);
-                    let _ais = AutoIncumbentScript::new(&*global);
+                    let realm = enter_realm(&*global);
+                    let comp = InRealm::Entered(&realm);
 
                     let abv = RootedObjectVectorWrapper::new(*global.get_cx());
 
@@ -1379,7 +1375,7 @@ fn fetch_module_descendants_and_link(
                         ))),
                     );
 
-                    promise_all.append_native_handler(&handler);
+                    promise_all.append_native_handler(&handler, comp);
 
                     return Some(promise_all);
                 }
