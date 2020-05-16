@@ -364,7 +364,7 @@ fn obtain_response(
     method: &Method,
     request_headers: &HeaderMap,
     body: Option<IpcSender<BodyChunkRequest>>,
-    request_len: usize,
+    request_len: Option<usize>,
     load_data_method: &Method,
     pipeline_id: &Option<PipelineId>,
     iters: u32,
@@ -391,7 +391,15 @@ fn obtain_response(
 
     let request_body = match body {
         Some(chunk_requester) if !is_redirected_request => {
-            headers.typed_insert(ContentLength(request_len as u64));
+            // TODO: If body is a stream, append `Transfer-Encoding`/`chunked`,
+            // see step 4.2 of https://fetch.spec.whatwg.org/#concept-http-network-fetch
+
+            // Step 5.6 of https://fetch.spec.whatwg.org/#concept-http-network-or-cache-fetch
+            // If source is non-null,
+            // set contentLengthValue to httpRequest’s body’s total bytes
+            if let Some(request_len) = request_len {
+                headers.typed_insert(ContentLength(request_len as u64));
+            }
             let (body_chan, body_port) = ipc::channel().unwrap();
 
             let (sender, receiver) = channel(1);
@@ -1447,10 +1455,7 @@ fn http_network_fetch(
         &request.method,
         &request.headers,
         request.body.as_mut().and_then(|body| body.take_stream()),
-        request
-            .body
-            .as_ref()
-            .map_or(0, |body| body.len().unwrap_or(0)),
+        request.body.as_ref().map_or(None, |body| body.len()),
         &request.method,
         &request.pipeline_id,
         request.redirect_count + 1,
