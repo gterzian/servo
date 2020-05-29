@@ -347,6 +347,14 @@ enum FileListenerState {
 }
 
 #[derive(JSTraceable, MallocSizeOf)]
+pub struct OffThreadCompilationData {
+    context: JSContext
+    canceller: TaskCanceller,
+    task_source: TimerTaskSource,
+    context: Trusted<GlobalScope>,
+}
+
+#[derive(JSTraceable, MallocSizeOf)]
 /// A holder of a weak reference for a DOM blob or file.
 pub enum BlobTracker {
     /// A weak ref to a DOM file.
@@ -2530,6 +2538,16 @@ impl GlobalScope {
     /// Evaluate JS code on this global scope.
     pub fn evaluate_js_on_global_with_result(&self, code: &str, rval: MutableHandleValue) -> bool {
         self.evaluate_script_on_global_with_result(code, "", rval, 1)
+    }
+
+    unsafe extern "C" fn off_thread_compilation_callback(
+        &self,
+        token: *mut c_void,
+        callbackData: *mut c_void,
+    ) {
+        let castedCallbackData = callbackData as *mut OffThreadCompilationData;
+        let script: JSScript* = FinishOffThreadScript(*(castedCallbackData.context), token);
+
     }
 
     /// Evaluate a JS script on this global scope.
