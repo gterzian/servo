@@ -34,7 +34,7 @@ use crate::dom::event::{Event, EventBubbles, EventCancelable, EventStatus};
 use crate::dom::eventsource::EventSource;
 use crate::dom::eventtarget::EventTarget;
 use crate::dom::file::File;
-use crate::dom::htmlscriptelement::ScriptId;
+use crate::dom::htmlscriptelement::{ScriptId, SourceCode};
 use crate::dom::identityhub::Identities;
 use crate::dom::imagebitmap::ImageBitmap;
 use crate::dom::messageevent::MessageEvent;
@@ -2537,24 +2537,15 @@ impl GlobalScope {
 
     /// Evaluate JS code on this global scope.
     pub fn evaluate_js_on_global_with_result(&self, code: &str, rval: MutableHandleValue) -> bool {
-        self.evaluate_script_on_global_with_result(code, "", rval, 1)
-    }
-
-    unsafe extern "C" fn off_thread_compilation_callback(
-        &self,
-        token: *mut c_void,
-        callbackData: *mut c_void,
-    ) {
-        let castedCallbackData = callbackData as *mut OffThreadCompilationData;
-        let script: JSScript* = FinishOffThreadScript(*(castedCallbackData.context), token);
-
+        let source_code = SourceCode::Text(DOMString::from_string((*code).to_string()));
+        self.evaluate_script_on_global_with_result(&source_code, "", rval, 1)
     }
 
     /// Evaluate a JS script on this global scope.
     #[allow(unsafe_code)]
     pub fn evaluate_script_on_global_with_result(
         &self,
-        code: &str,
+        code: &SourceCode,
         filename: &str,
         rval: MutableHandleValue,
         line_number: u32,
@@ -2583,14 +2574,16 @@ impl GlobalScope {
                     unsafe { CompileOptionsWrapper::new(*cx, filename.as_ptr(), line_number) };
 
                 debug!("evaluating Dom string");
-                let result = unsafe {
-                    Evaluate2(
-                        *cx,
-                        options.ptr,
-                        &mut transform_str_to_source_text(code),
-                        rval,
-                    )
-                };
+                if let SourceCode::Text(text_code) = code {
+                    let result = unsafe {
+                        Evaluate2(
+                            *cx,
+                            options.ptr,
+                            &mut transform_str_to_source_text(text_code.to_string()),
+                            rval,
+                        )
+                    };
+                }
 
                 if !result {
                     debug!("error evaluating Dom string");

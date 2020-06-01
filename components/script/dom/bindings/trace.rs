@@ -78,7 +78,7 @@ use hyper::StatusCode;
 use indexmap::IndexMap;
 use ipc_channel::ipc::{IpcReceiver, IpcSender};
 use js::glue::{CallObjectTracer, CallValueTracer};
-use js::jsapi::{GCTraceKindToAscii, Heap, JSObject, JSTracer, JobQueue, TraceKind};
+use js::jsapi::{GCTraceKindToAscii, Heap, JSObject, JSTracer, JobQueue, TraceKind, JSScript};
 use js::jsval::JSVal;
 use js::rust::{GCMethods, Handle, Runtime};
 use js::typedarray::TypedArray;
@@ -876,6 +876,12 @@ unsafe impl JSTraceable for StyleLocked<PropertyDeclarationBlock> {
 unsafe impl JSTraceable for StyleLocked<MediaList> {
     unsafe fn trace(&self, _trc: *mut JSTracer) {
         // Do nothing.
+    }
+}
+
+unsafe impl JSTraceable for JSScript {
+    unsafe fn trace(&self, _trc: *mut JSTracer) {
+        //Do nothing
     }
 }
 
