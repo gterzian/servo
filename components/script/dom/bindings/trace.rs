@@ -79,7 +79,7 @@ use hyper::StatusCode;
 use indexmap::IndexMap;
 use ipc_channel::ipc::{IpcReceiver, IpcSender};
 use js::glue::{CallObjectTracer, CallValueTracer};
-use js::jsapi::{GCTraceKindToAscii, Heap, JSObject, JSTracer, JobQueue, TraceKind, JSScript};
+use js::jsapi::{GCTraceKindToAscii, Heap, JSObject, JSScript, JSTracer, JobQueue, TraceKind};
 use js::jsval::JSVal;
 use js::rust::{GCMethods, Handle, Runtime};
 use js::typedarray::TypedArray;

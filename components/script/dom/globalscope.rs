@@ -337,14 +337,6 @@ enum FileListenerState {
 }
 
 #[derive(JSTraceable, MallocSizeOf)]
-pub struct OffThreadCompilationData {
-    context: JSContext
-    canceller: TaskCanceller,
-    task_source: TimerTaskSource,
-    context: Trusted<GlobalScope>,
-}
-
-#[derive(JSTraceable, MallocSizeOf)]
 /// A holder of a weak reference for a DOM blob or file.
 pub enum BlobTracker {
     /// A weak ref to a DOM file.
@@ -2520,23 +2512,24 @@ impl GlobalScope {
                 let ar = enter_realm(&*self);
 
                 let _aes = AutoEntryScript::new(self);
-                let options =
-                    unsafe { CompileOptionsWrapper::new(*cx, filename.as_ptr(), line_number) };
 
                 debug!("evaluating Dom string");
-                if let SourceCode::Text(text_code) = code {
-                    let result = unsafe {
+                let result = match code {
+                    SourceCode::Text(text_code) => unsafe {
+                        let options =
+                            CompileOptionsWrapper::new(*cx, filename.as_ptr(), line_number);
                         Evaluate2(
                             *cx,
                             options.ptr,
-                            &mut transform_str_to_source_text(text_code.to_string()),
+                            &mut transform_str_to_source_text(&text_code.to_string()),
                             rval,
                         )
-                    };
-                }
+                    },
+                    SourceCode::Compiled(_) => panic!("Not implemented yet."),
+                };
 
                 if !result {
-                    debug!("error evaluating Dom string");
+                    debug!("error evaluating script");
                     unsafe { report_pending_exception(*cx, true, InRealm::Entered(&ar)) };
                 }
 
