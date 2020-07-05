@@ -214,7 +214,7 @@ pub struct Window {
     resize_event: Cell<Option<(WindowSizeData, WindowSizeType)>>,
 
     /// Parent id associated with this page, if any.
-    parent_info: Option<PipelineId>,
+    parent_info: Option<BrowsingContextId>,
 
     /// Global static data related to the DOM.
     dom_static: GlobalStaticData,
@@ -423,10 +423,6 @@ impl Window {
 
     pub fn main_thread_script_chan(&self) -> &Sender<MainThreadScriptMsg> {
         &self.script_chan.0
-    }
-
-    pub fn parent_info(&self) -> Option<PipelineId> {
-        self.parent_info
     }
 
     pub fn new_script_pair(&self) -> (Box<dyn ScriptChan + Send>, Box<dyn ScriptPort + Send>) {
@@ -2238,6 +2234,10 @@ impl Window {
         self.current_state.get() == WindowState::Alive
     }
 
+    pub fn parent_info(&self) -> Option<BrowsingContextId> {
+        self.parent_info.clone()
+    }
+
     // https://html.spec.whatwg.org/multipage/#top-level-browsing-context
     pub fn is_top_level(&self) -> bool {
         self.parent_info.is_none()
@@ -2339,7 +2339,7 @@ impl Window {
         scheduler_chan: IpcSender<TimerSchedulerMsg>,
         layout_chan: Sender<Msg>,
         pipelineid: PipelineId,
-        parent_info: Option<PipelineId>,
+        parent_info: Option<BrowsingContextId>,
         window_size: WindowSizeData,
         origin: MutableOrigin,
         navigation_start: u64,

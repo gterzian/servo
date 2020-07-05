@@ -221,9 +221,9 @@ impl LoadData {
 /// The initial data required to create a new layout attached to an existing script thread.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct NewLayoutInfo {
-    /// The ID of the parent pipeline and frame type, if any.
-    /// If `None`, this is a root pipeline.
-    pub parent_info: Option<PipelineId>,
+    /// The browsing context of the parent of this pipeline.
+    /// If `None`, this is the root.
+    pub parent_info: Option<BrowsingContextId>,
     /// Id of the newly-created pipeline.
     pub new_pipeline_id: PipelineId,
     /// Id of the browsing context associated with this pipeline.
@@ -632,9 +632,9 @@ pub fn precise_time_ms() -> MsDuration {
 pub struct InitialScriptState {
     /// The ID of the pipeline with which this script thread is associated.
     pub id: PipelineId,
-    /// The subpage ID of this pipeline to create in its pipeline parent.
+    /// The browsing context of the parent of this pipeline.
     /// If `None`, this is the root.
-    pub parent_info: Option<PipelineId>,
+    pub parent_info: Option<BrowsingContextId>,
     /// The ID of the browsing context this script is part of.
     pub browsing_context_id: BrowsingContextId,
     /// The ID of the top-level browsing context this script is part of.

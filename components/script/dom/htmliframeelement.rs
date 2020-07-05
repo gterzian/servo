@@ -198,7 +198,7 @@ impl HTMLIFrameElement {
                     .unwrap();
 
                 let new_layout_info = NewLayoutInfo {
-                    parent_info: Some(global_scope.pipeline_id()),
+                    parent_info: Some(window.window_proxy().browsing_context_id()),
                     new_pipeline_id: new_pipeline_id,
                     browsing_context_id: browsing_context_id,
                     top_level_browsing_context_id: top_level_browsing_context_id,

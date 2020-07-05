@@ -191,8 +191,8 @@ struct InProgressLoad {
     browsing_context_id: BrowsingContextId,
     /// The top level ancestor browsing context.
     top_level_browsing_context_id: TopLevelBrowsingContextId,
-    /// The parent pipeline and frame type associated with this load, if any.
-    parent_info: Option<PipelineId>,
+    /// The parent browsing context associated with this load, if any.
+    parent_info: Option<BrowsingContextId>,
     /// The opener, if this is an auxiliary.
     opener: Option<BrowsingContextId>,
     /// The current window size associated with this pipeline.
@@ -223,7 +223,7 @@ impl InProgressLoad {
         id: PipelineId,
         browsing_context_id: BrowsingContextId,
         top_level_browsing_context_id: TopLevelBrowsingContextId,
-        parent_info: Option<PipelineId>,
+        parent_info: Option<BrowsingContextId>,
         opener: Option<BrowsingContextId>,
         layout_chan: Sender<message::Msg>,
         window_size: WindowSizeData,
@@ -1507,9 +1507,15 @@ impl ScriptThread {
                             let origin = if new_layout_info.load_data.url.as_str() != "about:blank"
                             {
                                 MutableOrigin::new(new_layout_info.load_data.url.origin())
-                            } else if let Some(parent) =
-                                new_layout_info.parent_info.and_then(|pipeline_id| {
-                                    self.documents.borrow().find_document(pipeline_id)
+                            } else if let Some(parent) = new_layout_info
+                                .parent_info
+                                .as_ref()
+                                .and_then(|browsing_context_id| {
+                                    self.window_proxies
+                                        .borrow()
+                                        .get(browsing_context_id)
+                                        .expect("Couldn't find the parent for an about:blank load.")
+                                        .document()
                                 })
                             {
                                 parent.origin().clone()
@@ -2685,7 +2691,7 @@ impl ScriptThread {
                 &*window,
                 browsing_context_id,
                 top_level_browsing_context_id,
-                Some(parent_pipeline_id),
+                window.parent_info(),
                 // Any local window proxy has already been created, so there
                 // is no need to pass along existing opener information that
                 // will be discarded.
@@ -3123,7 +3129,7 @@ impl ScriptThread {
         window: &Window,
         browsing_context_id: BrowsingContextId,
         top_level_browsing_context_id: TopLevelBrowsingContextId,
-        parent_info: Option<PipelineId>,
+        parent_info: Option<BrowsingContextId>,
         opener: Option<BrowsingContextId>,
     ) -> DomRoot<WindowProxy> {
         if let Some(window_proxy) = self.window_proxies.borrow().get(&browsing_context_id) {
@@ -3131,31 +3137,22 @@ impl ScriptThread {
             // this will be done instead when the script-thread handles the `SetDocumentActivity` msg.
             return DomRoot::from_ref(window_proxy);
         }
-        let iframe = parent_info.and_then(|parent_id| {
-            self.documents
+        let iframe = parent_info.as_ref().and_then(|parent_id| {
+            self.window_proxies
                 .borrow()
-                .find_iframe(parent_id, browsing_context_id)
+                .get(parent_id)
+                .and_then(|proxy| proxy.document())
+                .and_then(|doc| doc.find_iframe(browsing_context_id))
         });
         let parent_browsing_context = match (parent_info, iframe.as_ref()) {
             (_, Some(iframe)) => Some(window_from_node(&**iframe).window_proxy()),
-            (Some(parent_id), _) => {
-                let (result_sender, result_receiver) = ipc::channel().unwrap();
-                let msg = ScriptMsg::GetBrowsingContextInfo(parent_id, result_sender);
-                self.script_sender
-                    .send((parent_id, msg))
-                    .expect("Failed to send to constellation.");
-                let browsing_context_id = result_receiver
-                    .recv()
-                    .expect("Failed to get reply from the constellation.")
-                    .expect("Failed to get browsing context info from constellation.");
-                self.remote_window_proxy(
-                    window.upcast(),
-                    top_level_browsing_context_id,
-                    browsing_context_id,
-                    None,
-                    opener,
-                )
-            },
+            (Some(parent_id), _) => self.remote_window_proxy(
+                window.upcast(),
+                top_level_browsing_context_id,
+                parent_id,
+                None,
+                opener,
+            ),
             _ => None,
         };
 

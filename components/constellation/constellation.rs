@@ -1087,14 +1087,14 @@ where
             pipeline_id, browsing_context_id
         );
 
-        let (event_loop, host) = match sandbox {
-            IFrameSandboxState::IFrameSandboxed => (None, None),
+        let (parent_info, event_loop, host) = match sandbox {
+            IFrameSandboxState::IFrameSandboxed => (None, None, None),
             IFrameSandboxState::IFrameUnsandboxed => {
                 // If this is an about:blank load, it must share the creator's event loop.
                 // This must match the logic in the script thread when determining the proper origin.
                 if load_data.url.as_str() != "about:blank" {
                     match reg_host(&load_data.url) {
-                        None => (None, None),
+                        None => (None, None, None),
                         Some(host) => {
                             match self.get_event_loop(
                                 &host,
@@ -1103,13 +1103,13 @@ where
                             ) {
                                 Err(err) => {
                                     warn!("{}", err);
-                                    (None, Some(host))
+                                    (None, None, Some(host))
                                 },
                                 Ok(event_loop) => {
                                     if let Some(event_loop) = event_loop.upgrade() {
-                                        (Some(event_loop), None)
+                                        (None, Some(event_loop), None)
                                     } else {
-                                        (None, Some(host))
+                                        (None, None, Some(host))
                                     }
                                 },
                             }
@@ -1118,14 +1118,18 @@ where
                 } else if let Some(parent) =
                     parent_pipeline_id.and_then(|pipeline_id| self.pipelines.get(&pipeline_id))
                 {
-                    (Some(parent.event_loop.clone()), None)
+                    (
+                        Some(parent.browsing_context_id),
+                        Some(parent.event_loop.clone()),
+                        None,
+                    )
                 } else if let Some(creator) = load_data
                     .creator_pipeline_id
                     .and_then(|pipeline_id| self.pipelines.get(&pipeline_id))
                 {
-                    (Some(creator.event_loop.clone()), None)
+                    (None, Some(creator.event_loop.clone()), None)
                 } else {
-                    (None, None)
+                    (None, None, None)
                 }
             },
         };
@@ -1140,7 +1144,7 @@ where
             id: pipeline_id,
             browsing_context_id,
             top_level_browsing_context_id,
-            parent_pipeline_id,
+            parent_info,
             opener,
             script_to_constellation_chan: ScriptToConstellationChan {
                 sender: self.script_sender.clone(),

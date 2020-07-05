@@ -113,9 +113,9 @@ pub struct InitialPipelineState {
     /// The ID of the top-level browsing context that contains this Pipeline.
     pub top_level_browsing_context_id: TopLevelBrowsingContextId,
 
-    /// The ID of the parent pipeline and frame type, if any.
+    /// The browsing context of the parent of this pipeline.
     /// If `None`, this is the root.
-    pub parent_pipeline_id: Option<PipelineId>,
+    pub parent_info: Option<BrowsingContextId>,
 
     pub opener: Option<BrowsingContextId>,
 
@@ -225,7 +225,7 @@ impl Pipeline {
         let (script_chan, bhm_control_chan) = match state.event_loop {
             Some(script_chan) => {
                 let new_layout_info = NewLayoutInfo {
-                    parent_info: state.parent_pipeline_id,
+                    parent_info: state.parent_info,
                     new_pipeline_id: state.id,
                     browsing_context_id: state.browsing_context_id,
                     top_level_browsing_context_id: state.top_level_browsing_context_id,
@@ -274,7 +274,7 @@ impl Pipeline {
                     id: state.id,
                     browsing_context_id: state.browsing_context_id,
                     top_level_browsing_context_id: state.top_level_browsing_context_id,
-                    parent_pipeline_id: state.parent_pipeline_id,
+                    parent_info: state.parent_info,
                     opener: state.opener,
                     script_to_constellation_chan: state.script_to_constellation_chan.clone(),
                     namespace_request_sender: state.namespace_request_sender,
@@ -484,7 +484,7 @@ pub struct UnprivilegedPipelineContent {
     id: PipelineId,
     top_level_browsing_context_id: TopLevelBrowsingContextId,
     browsing_context_id: BrowsingContextId,
-    parent_pipeline_id: Option<PipelineId>,
+    parent_info: Option<BrowsingContextId>,
     opener: Option<BrowsingContextId>,
     namespace_request_sender: IpcSender<PipelineNamespaceRequest>,
     script_to_constellation_chan: ScriptToConstellationChan,
@@ -545,7 +545,7 @@ impl UnprivilegedPipelineContent {
                 id: self.id,
                 browsing_context_id: self.browsing_context_id,
                 top_level_browsing_context_id: self.top_level_browsing_context_id,
-                parent_info: self.parent_pipeline_id,
+                parent_info: self.parent_info,
                 opener: self.opener,
                 control_chan: self.script_chan.clone(),
                 control_port: self.script_port,
@@ -589,7 +589,7 @@ impl UnprivilegedPipelineContent {
             self.id,
             self.top_level_browsing_context_id,
             self.load_data.url,
-            self.parent_pipeline_id.is_some(),
+            self.parent_info.is_some(),
             layout_pair,
             self.pipeline_port,
             background_hang_monitor_register,
