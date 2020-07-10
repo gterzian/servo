@@ -27,6 +27,7 @@ use crate::dom::performanceresourcetiming::InitiatorType;
 use crate::dom::virtualmethods::VirtualMethods;
 use crate::fetch::create_a_potential_cors_request;
 use crate::network_listener::{self, NetworkListener, PreInvoke, ResourceTimingListener};
+use crate::realms::enter_realm;
 use crate::script_module::fetch_inline_module_script;
 use crate::script_module::{fetch_external_module_script, ModuleOwner};
 use crate::task::TaskCanceller;
@@ -74,7 +75,7 @@ pub struct OffThreadCompilationContext {
 /// A wrapper to mark OffThreadToken as Send,
 /// which should be safe according to
 /// mozjs/js/public/OffThreadScriptCompilation.h
-struct OffThreadCompilationToken(*mut OffThreadToken);
+struct OffThreadCompilationToken(Box<OffThreadToken>);
 
 #[allow(unsafe_code)]
 unsafe impl Send for OffThreadCompilationToken {}
@@ -84,9 +85,8 @@ unsafe extern "C" fn off_thread_compilation_callback(
     token: *mut OffThreadToken,
     callback_data: *mut c_void,
 ) {
-    let context = &*(callback_data as *mut OffThreadCompilationContext);
-
-    let token = OffThreadCompilationToken(token);
+    let context = Box::from_raw(callback_data as *mut OffThreadCompilationContext);
+    let token = OffThreadCompilationToken(Box::from_raw(token));
     let url = context.url.clone();
     let final_url = context.final_url.clone();
     let script_element = context.script_element.clone();
@@ -98,10 +98,16 @@ unsafe extern "C" fn off_thread_compilation_callback(
             let elem = script_element.root();
             let global = elem.global();
             let cx = global.get_cx();
+            let _ar = enter_realm(&*global);
+
+            let raw_token = Box::into_raw(token.0);
 
             rooted!(in(*cx)
-                let compiled_script = FinishOffThreadScript(*cx, token.0)
+                let compiled_script = FinishOffThreadScript(*cx, raw_token)
             );
+
+            // Let the box clean-up the memory.
+            let _ = Box::from_raw(raw_token);
 
             let load = if compiled_script.get().is_null() {
                 Err(NetworkError::Internal(
@@ -386,6 +392,7 @@ impl FetchResponseListener for ClassicContext {
         let elem = self.elem.root();
         let global = elem.global();
         let cx = global.get_cx();
+        let _ar = enter_realm(&*global);
 
         let options =
             unsafe { CompileOptionsWrapper::new(*cx, final_url.as_str().as_ptr() as *const i8, 1) };
@@ -394,14 +401,14 @@ impl FetchResponseListener for ClassicContext {
             unsafe { CanCompileOffThread(*cx, options.ptr as *const _, source_text.len()) };
 
         if can_compile_off_thread {
-            let mut context = OffThreadCompilationContext {
+            let context = Box::into_raw(Box::new(OffThreadCompilationContext {
                 script_element: self.elem.clone(),
                 script_kind: self.kind.clone(),
                 final_url,
                 url: self.url.clone(),
                 task_source: global.networking_task_source(),
                 canceller: global.task_canceller(TaskSourceName::Networking),
-            };
+            }));
 
             let source_text: Vec<u16> = source_text.encode_utf16().collect();
 
@@ -411,7 +418,7 @@ impl FetchResponseListener for ClassicContext {
                     options.ptr as *const _,
                     &mut transform_u16_to_source_text(&source_text) as *mut _,
                     Some(off_thread_compilation_callback),
-                    &mut context as *mut _ as *mut c_void,
+                    context as *mut _ as *mut c_void,
                 ));
             }
         } else {
