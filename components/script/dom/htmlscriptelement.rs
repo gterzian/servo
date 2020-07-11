@@ -363,8 +363,8 @@ impl FetchResponseListener for ClassicContext {
     /// step 4-9
     #[allow(unsafe_code)]
     fn process_response_eof(&mut self, response: Result<ResourceFetchTiming, NetworkError>) {
-        let (source_text, final_url) = match response {
-            Err(err) => {
+        let (source_text, final_url) = match (response, self.status.as_ref()) {
+            (Err(err), _) => {
                 // Step 6, response is an error.
                 finish_fetching_a_classic_script(
                     &*self.elem.root(),
@@ -374,7 +374,17 @@ impl FetchResponseListener for ClassicContext {
                 );
                 return;
             },
-            Ok(_) => {
+            (_, Err(err)) => {
+                // Step 6, response is an error.
+                finish_fetching_a_classic_script(
+                    &*self.elem.root(),
+                    self.kind.clone(),
+                    self.url.clone(),
+                    Err(err.clone()),
+                );
+                return;
+            },
+            (Ok(_), Ok(_)) => {
                 let metadata = self.metadata.take().unwrap();
 
                 // Step 7.
