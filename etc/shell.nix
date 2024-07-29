@@ -5,7 +5,7 @@
   buildAndroid ? false
 }:
 with import (builtins.fetchTarball {
-  url = "https://github.com/NixOS/nixpkgs/archive/46ae0210ce163b3cba6c7da08840c1d63de9c701.tar.gz";
+  url = "https://github.com/NixOS/nixpkgs/archive/63d37ccd2d178d54e7fb691d7ec76000740ea24a.tar.gz";
 }) {
   overlays = [
     (import (builtins.fetchTarball {
@@ -45,7 +45,7 @@ let
       systemImageTypes = [ "google_apis" ];
       abiVersions = [ "x86" "armeabi-v7a" ];
       includeNDK = true;
-      ndkVersion = "25.2.9519653";
+      ndkVersion = "26.2.11394342";
       useGoogleAPIs = false;
       useGoogleTVAddOns = false;
       includeExtras = [
@@ -77,6 +77,7 @@ stdenv.mkDerivation (androidEnvironment // {
 
     rustup
     taplo
+    cargo-deny
     llvmPackages.bintools # provides lld
 
     udev # Needed by libudev-sys for GamePad API.
@@ -157,7 +158,7 @@ stdenv.mkDerivation (androidEnvironment // {
   # Provide libraries that aren’t linked against but somehow required
   LD_LIBRARY_PATH = lib.makeLibraryPath [
     # Fixes missing library errors
-    zlib xorg.libXcursor xorg.libXrandr xorg.libXi libxkbcommon
+    xorg.libXcursor xorg.libXrandr xorg.libXi libxkbcommon
 
     # [WARN  script::dom::gpu] Could not get GPUAdapter ("NotFound")
     # TLA Err: Error: Couldn't request WebGPU adapter.
