@@ -793,7 +793,7 @@ impl ReadableStreamDefaultController {
     }
 
     /// <https://streams.spec.whatwg.org/#readable-stream-default-controller-error>
-    fn error(&self, e: SafeHandleValue) {
+    pub fn error(&self, e: SafeHandleValue) {
         let Some(stream) = self.stream.get() else {
             return;
         };
