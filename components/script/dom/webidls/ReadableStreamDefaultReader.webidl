@@ -32,3 +32,11 @@ dictionary ReadableStreamReadResult {
  boolean done;
 };
 
+// The TeeReadRequest interface is entirely internal to Servo, and should not be accessible to
+// web pages.
+
+[LegacyNoInterfaceObject, Exposed=(Window,Worker)]
+// Need to escape "TeeReadRequest" so it's treated as an identifier.
+interface _TeeReadRequest {
+};
+

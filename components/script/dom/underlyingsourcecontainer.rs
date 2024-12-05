@@ -17,11 +17,14 @@ use crate::dom::bindings::callback::ExceptionHandling;
 use crate::dom::bindings::codegen::Bindings::UnderlyingSourceBinding::UnderlyingSource as JsUnderlyingSource;
 use crate::dom::bindings::import::module::Error;
 use crate::dom::bindings::import::module::UnionTypes::ReadableStreamDefaultControllerOrReadableByteStreamController as Controller;
-use crate::dom::bindings::reflector::{reflect_dom_object_with_proto, DomObject, Reflector};
+use crate::dom::bindings::reflector::{
+    reflect_dom_object, reflect_dom_object_with_proto, DomObject, Reflector,
+};
 use crate::dom::bindings::root::{Dom, DomRoot};
 use crate::dom::globalscope::GlobalScope;
 use crate::dom::promise::Promise;
-use crate::dom::readablestreamdefaultreader::{ReadRequest, TeeReadRequest};
+use crate::dom::readablestreamdefaultreader::ReadRequest;
+use crate::dom::teereadrequest::TeeReadRequest;
 use crate::script_runtime::CanGc;
 
 /// <https://streams.spec.whatwg.org/#underlying-source-api>
@@ -150,8 +153,8 @@ impl TeeUnderlyingSource {
         self.reading.set(true);
 
         // Let readRequest be a read request with the following items:
-        let read_request = ReadRequest::Tee {
-            tee_read_request: TeeReadRequest::new(
+        let tee_read_request = reflect_dom_object(
+            Box::new(TeeReadRequest::new(
                 self.stream.clone(),
                 self.branch_1.clone(),
                 self.branch_2.clone(),
@@ -162,7 +165,11 @@ impl TeeUnderlyingSource {
                 self.clone_for_branch_2.clone(),
                 self.cancel_promise.clone(),
                 Dom::from_ref(self),
-            ),
+            )),
+            &*self.global(),
+        );
+        let read_request = ReadRequest::Tee {
+            tee_read_request: Dom::from_ref(&tee_read_request),
         };
 
         // Perform ! ReadableStreamDefaultReaderRead(reader, readRequest).
