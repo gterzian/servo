@@ -411,13 +411,19 @@ impl ReadableStream {
         can_gc: CanGc,
     ) -> Fallible<DomRoot<ReadableStreamDefaultReader>> {
         // Let reader be a new ReadableStreamDefaultReader.
-        let reader = ReadableStreamDefaultReader::new_inherited(&self.global(), can_gc);
+        let reader = reflect_dom_object(
+            Box::new(ReadableStreamDefaultReader::new_inherited(
+                &self.global(),
+                can_gc,
+            )),
+            &*self.global(),
+        );
 
         // Perform ? SetUpReadableStreamDefaultReader(reader, stream).
         reader.set_up(self, &self.global(), can_gc)?;
 
         // Return reader.
-        Ok(reflect_dom_object(Box::new(reader), &*self.global()))
+        Ok(reader)
     }
 
     /// Read a chunk from the stream,
@@ -735,7 +741,9 @@ impl ReadableStreamMethods for ReadableStream {
     ) -> Fallible<ReadableStreamReader> {
         // 1, If options["mode"] does not exist, return ? AcquireReadableStreamDefaultReader(this).
         if options.mode.is_none() {
-            return Ok(ReadableStreamReader::ReadableStreamDefaultReader(self.acquire_default_reader(can_gc)?));
+            return Ok(ReadableStreamReader::ReadableStreamDefaultReader(
+                self.acquire_default_reader(can_gc)?,
+            ));
         }
         // 2. Assert: options["mode"] is "byob".
         assert!(options.mode.unwrap() == ReadableStreamReaderMode::Byob);

@@ -98,12 +98,12 @@ impl ReadableStreamDefaultReader {
         stream: &ReadableStream,
     ) -> Fallible<DomRoot<Self>> {
         error!("ReadableStreamDefaultReader::Constructor");
-        let reader = ReadableStreamDefaultReader::new_inherited(global, can_gc);
+        let reader = reflect_dom_object(Box::new(ReadableStreamDefaultReader::new_inherited(global, can_gc)), global);
 
         // Perform ? SetUpReadableStreamDefaultReader(this, stream).
         Self::set_up(&reader, stream, global, can_gc)?;
 
-        Ok(reflect_dom_object(Box::new(reader), global))
+        Ok(reader)
     }
 
     pub fn new_inherited(global: &GlobalScope, can_gc: CanGc) -> ReadableStreamDefaultReader {
