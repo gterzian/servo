@@ -608,6 +608,7 @@ pub mod workernavigator;
 pub mod worklet;
 pub mod workletglobalscope;
 pub mod writablestream;
+pub mod writablestreamdefaultcontroller;
 pub mod writablestreamdefaultwriter;
 pub mod xmldocument;
 pub mod xmlhttprequest;
