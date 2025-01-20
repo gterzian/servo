@@ -310,6 +310,34 @@ impl WritableStream {
         }
     }
 
+    /// <https://streams.spec.whatwg.org/#writable-stream-finish-in-flight-close>
+    pub(crate) fn finish_in_flight_close(&self) {
+        // TODO
+    }
+
+    /// <https://streams.spec.whatwg.org/#writable-stream-finish-in-flight-close-with-error>
+    pub(crate) fn finish_in_flight_close_with_error(&self, error: SafeHandleValue, can_gc: CanGc) {
+        // TODO
+    }
+
+    /// <https://streams.spec.whatwg.org/#writable-stream-mark-close-request-in-flight>
+    pub(crate) fn mark_close_request_in_flight(&self) {
+        let mut close_request = self.close_request.borrow_mut();
+        let mut in_flight_close_request = self.in_flight_close_request.borrow_mut();
+
+        // Assert: stream.[[inFlightCloseRequest]] is undefined.
+        assert!(in_flight_close_request.is_none());
+
+        // Assert: stream.[[closeRequest]] is not undefined.
+        assert!(close_request.is_some());
+
+        // Set stream.[[inFlightCloseRequest]] to stream.[[closeRequest]].
+        *in_flight_close_request = close_request.take();
+
+        // Set stream.[[closeRequest]] to undefined.
+        // Done above with `take`.
+    }
+
     /// <https://streams.spec.whatwg.org/#writable-stream-reject-close-and-closed-promise-if-needed>
     #[allow(unsafe_code)]
     fn reject_close_and_closed_promise_if_needed(&self) {

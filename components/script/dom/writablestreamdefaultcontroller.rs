@@ -36,11 +36,52 @@ use crate::realms::{enter_realm, InRealm};
 use crate::script_runtime::{CanGc, JSContext as SafeJSContext};
 
 /// The fulfillment handler for
+/// <https://streams.spec.whatwg.org/#writable-stream-default-controller-process-close>
+#[derive(Clone, JSTraceable, MallocSizeOf)]
+#[allow(crown::unrooted_must_root)]
+struct CloseAlgorithmFulfillmentHandler {
+    controller: Dom<WritableStreamDefaultController>,
+}
+
+impl Callback for CloseAlgorithmFulfillmentHandler {
+    fn callback(&self, cx: SafeJSContext, _v: SafeHandleValue, realm: InRealm, can_gc: CanGc) {
+        let controller = self.controller.as_rooted();
+        let stream = controller
+            .stream
+            .get()
+            .expect("Controller should have a stream.");
+
+        // Perform ! WritableStreamFinishInFlightClose(stream).
+        stream.finish_in_flight_close();
+    }
+}
+
+/// The rejection handler for
+/// <https://streams.spec.whatwg.org/#writable-stream-default-controller-process-close>
+#[derive(Clone, JSTraceable, MallocSizeOf)]
+#[allow(crown::unrooted_must_root)]
+struct CloseAlgorithmRejectionHandler {
+    controller: Dom<WritableStreamDefaultController>,
+}
+
+impl Callback for CloseAlgorithmRejectionHandler {
+    fn callback(&self, cx: SafeJSContext, v: SafeHandleValue, realm: InRealm, can_gc: CanGc) {
+        let controller = self.controller.as_rooted();
+        let stream = controller
+            .stream
+            .get()
+            .expect("Controller should have a stream.");
+
+        // Perform ! WritableStreamFinishInFlightCloseWithError(stream, reason).
+        stream.finish_in_flight_close_with_error(v, can_gc);
+    }
+}
+
+/// The fulfillment handler for
 /// <https://streams.spec.whatwg.org/#set-up-writable-stream-default-controller>
 #[derive(Clone, JSTraceable, MallocSizeOf)]
 #[allow(crown::unrooted_must_root)]
 struct StartAlgorithmFulfillmentHandler {
-    #[ignore_malloc_size_of = "Trusted are hard"]
     controller: Dom<WritableStreamDefaultController>,
 }
 
@@ -440,6 +481,35 @@ impl WritableStreamDefaultController {
         })
     }
 
+    #[allow(unsafe_code)]
+    pub(crate) fn call_close_algorithm(
+        &self,
+        global: &GlobalScope,
+        can_gc: CanGc,
+    ) -> Rc<Promise> {
+        let cx = GlobalScope::get_cx();
+        rooted!(in(*cx) let mut this_object = ptr::null_mut::<JSObject>());
+        this_object.set(self.underlying_sink_obj.get());
+        let algo = self.close.borrow().clone();
+        let result = if let Some(algo) = algo {
+            unsafe {
+                algo.Call_(
+                    &this_object.handle(),
+                    ExceptionHandling::Rethrow,
+                )
+            }
+        } else {
+            let promise = Promise::new(&global, can_gc);
+            promise.resolve_native(&());
+            Ok(promise)
+        };
+        result.unwrap_or_else(|_| {
+            let promise = Promise::new(&global, can_gc);
+            promise.resolve_native(&());
+            promise
+        })
+    }
+
     /// <https://streams.spec.whatwg.org/#writable-stream-default-controller-advance-queue-if-needed>
     fn advance_queue_if_needed(&self, global: &GlobalScope, can_gc: CanGc) {
         // Let stream be controller.[[stream]].
@@ -560,6 +630,42 @@ impl WritableStreamDefaultController {
 
         // Return true if desiredSize ≤ 0, or false otherwise.
         desired_size.is_sign_positive()
+    }
+
+    /// <https://streams.spec.whatwg.org/#writable-stream-default-controller-process-close>
+    fn process_close(&self, stream: &WritableStream, cx: SafeJSContext, global: &GlobalScope, can_gc: CanGc) {
+        // Let stream be controller.[[stream]].
+        // Done above with the argument.
+
+        // Perform ! WritableStreamMarkCloseRequestInFlight(stream).
+        stream.mark_close_request_in_flight();
+
+        // Perform ! DequeueValue(controller).
+        rooted!(in(*cx) let mut rval = UndefinedValue());
+        self.dequeue_value(cx, rval.handle_mut());
+
+        // Assert: controller.[[queue]] is empty.
+        assert!(self.queue.borrow().is_empty());
+
+        // Let sinkClosePromise be the result of performing controller.[[closeAlgorithm]].
+        let sink_promise = self.call_close_algorithm(global, can_gc);
+
+        // Perform ! WritableStreamDefaultControllerClearAlgorithms(controller).
+        self.clear_algorithms();
+
+        // Upon fulfillment of sinkClosePromise,
+        let fulfillment_handler = Box::new(CloseAlgorithmFulfillmentHandler {
+            controller: Dom::from_ref(self),
+        });
+
+        // Upon rejection of sinkClosePromise with reason reason,
+        let rejection_handler = Box::new(CloseAlgorithmRejectionHandler {
+            controller: Dom::from_ref(self),
+        });
+        let handler = PromiseNativeHandler::new(global, Some(fulfillment_handler), Some(rejection_handler));
+        let realm = enter_realm(global);
+        let comp = InRealm::Entered(&realm);
+        sink_promise.append_native_handler(&handler, comp, can_gc);
     }
 
     /// <https://streams.spec.whatwg.org/#writable-stream-default-controller-error>
