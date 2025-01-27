@@ -173,6 +173,13 @@ impl WritableStreamDefaultWriter {
         *self.closed_promise.borrow_mut() = Some(promise);
     }
 
+    pub(crate) fn resolve_closed_promise(&self) {
+        let Some(promise) = &*self.closed_promise.borrow() else {
+            unreachable!("Promise should have been set.");
+        };
+        promise.resolve_native(&());
+    }
+
     pub(crate) fn resolve_ready_promise(&self) {
         let Some(promise) = &*self.ready_promise.borrow() else {
             unreachable!("Promise should have been set.");
