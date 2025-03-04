@@ -186,7 +186,7 @@ impl ReadRequest {
                 );
             },
             ReadRequest::DefaultTee { tee_read_request } => {
-                tee_read_request.enqueue_chunk_steps(chunk);
+                tee_read_request.enqueue_chunk_steps(chunk, can_gc);
             },
         }
     }

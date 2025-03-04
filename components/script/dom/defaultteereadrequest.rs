@@ -21,7 +21,9 @@ use crate::dom::globalscope::GlobalScope;
 use crate::dom::promise::Promise;
 use crate::dom::readablestream::ReadableStream;
 use crate::microtask::Microtask;
-use crate::script_runtime::CanGc;
+use crate::script_runtime::{CanGc, JSContext, JSContext as SafeJSContext};
+use crate::dom::promisenativehandler::{Callback, PromiseNativeHandler};
+use crate::realms::{enter_realm, InRealm};
 
 #[derive(JSTraceable, MallocSizeOf)]
 #[cfg_attr(crown, allow(crown::unrooted_must_root))]
@@ -36,6 +38,15 @@ impl DefaultTeeReadRequestMicrotask {
         self.tee_read_request.chunk_steps(&self.chunk, can_gc)
     }
 }
+
+impl Callback for DefaultTeeReadRequestMicrotask {
+    /// Continuation of <https://streams.spec.whatwg.org/#readable-stream-default-controller-call-pull-if-needed>
+    /// Upon fulfillment of pullPromise
+    fn callback(&self, _cx: SafeJSContext, _v: SafeHandleValue, _realm: InRealm, can_gc: CanGc) {
+        self.tee_read_request.chunk_steps(&self.chunk, can_gc)
+    }
+}
+
 
 #[dom_struct]
 /// <https://streams.spec.whatwg.org/#ref-for-read-request%E2%91%A2>
@@ -99,19 +110,25 @@ impl DefaultTeeReadRequest {
     }
     /// Enqueue a microtask to perform the chunk steps
     /// <https://streams.spec.whatwg.org/#ref-for-read-request-chunk-steps%E2%91%A2>
-    pub(crate) fn enqueue_chunk_steps(&self, chunk: RootedTraceableBox<Heap<JSVal>>) {
+    pub(crate) fn enqueue_chunk_steps(&self, chunk: RootedTraceableBox<Heap<JSVal>>, can_gc: CanGc) {
         // Queue a microtask to perform the following steps:
-        let tee_read_request_chunk = DefaultTeeReadRequestMicrotask {
+        let tee_read_request_chunk = Box::new(DefaultTeeReadRequestMicrotask {
             chunk: Heap::boxed(*chunk.handle()),
             tee_read_request: Dom::from_ref(self),
-        };
+        });
         let global = self.stream.global();
-        let microtask_queue = global.microtask_queue();
-        let cx = GlobalScope::get_cx();
-        microtask_queue.enqueue(
-            Microtask::ReadableStreamTeeReadRequest(tee_read_request_chunk),
-            cx,
+        let handler = PromiseNativeHandler::new(
+            &global,
+            Some(tee_read_request_chunk),
+            None,
+            can_gc,
         );
+
+        let realm = enter_realm(&*global);
+        let comp = InRealm::Entered(&realm);
+        let promise = Promise::new(&global, can_gc);
+        promise.resolve_native(&(), can_gc);
+        promise.append_native_handler(&handler, comp, can_gc);
     }
     /// <https://streams.spec.whatwg.org/#ref-for-read-request-chunk-steps%E2%91%A2>
     #[allow(clippy::borrowed_box)]
