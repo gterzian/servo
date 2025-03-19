@@ -529,7 +529,7 @@ impl FileReader {
         reader.read_all_bytes(
             cx,
             &self.global(),
-            Rc::new(move |blob_contents| {
+            Rc::new(move |cx, blob_contents| {
                 let global = filereader_success.global();
                 let task_manager = global.task_manager();
                 let task_source = task_manager.file_reading_task_source();

@@ -320,7 +320,7 @@ impl BlobMethods<crate::DomTypeHolder> for Blob {
         reader.read_all_bytes(
             cx,
             &global,
-            Rc::new(move |bytes| {
+            Rc::new(move |cx, bytes| {
                 rooted!(in(*cx) let mut js_object = ptr::null_mut::<JSObject>());
                 let arr = create_buffer_source::<Uint8>(cx, bytes, js_object.handle_mut(), can_gc)
                     .expect("Converting input to uint8 array should never fail");

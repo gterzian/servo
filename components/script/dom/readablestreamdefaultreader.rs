@@ -33,7 +33,7 @@ use crate::dom::readablestreamgenericreader::ReadableStreamGenericReader;
 use crate::realms::{InRealm, enter_realm};
 use crate::script_runtime::{CanGc, JSContext as SafeJSContext};
 
-type ReadAllBytesSuccessSteps = dyn Fn(&[u8]);
+type ReadAllBytesSuccessSteps = dyn Fn(SafeJSContext, &[u8]);
 type ReadAllBytesFailureSteps = dyn Fn(SafeJSContext, SafeHandleValue);
 
 impl js::gc::Rootable for ReadLoopFulFillmentHandler {}
@@ -76,7 +76,7 @@ impl Callback for ReadLoopFulFillmentHandler {
         if is_done {
             // <https://streams.spec.whatwg.org/#ref-for-read-request-close-steps%E2%91%A6>
             // Call successSteps with bytes.
-            (self.success_steps)(&self.bytes.borrow());
+            (self.success_steps)(cx, &self.bytes.borrow());
             self.reader
                 .release(can_gc)
                 .expect("Releasing the reader should succeed");
