@@ -376,6 +376,7 @@ unsafe extern "C" fn cleanup_finalization_registry(
     incumbent_global: *mut JSObject,
     _data: *mut c_void,
 ) {
+    println!("cleanup_finalization_registry");
     LiveDOMReferences::enqueue_finalization_callback(Heap::boxed(do_cleanup));
     let global = GlobalScope::from_object(incumbent_global);
 
@@ -391,10 +392,14 @@ unsafe extern "C" fn cleanup_finalization_registry(
                 let cx = GlobalScope::get_cx();
                 let global = global_handle.root();
                 // 2.2 Check if we can run script
-                if let Some(window) = global.downcast::<Window>() {
-                    if !window.Document().is_fully_active() {
-                        return;
-                    }
+                let Some(window) = global.downcast::<Window>() else {
+                    // Note: not good because needs to run in worker too.
+                    unreachable!("");
+                };
+                
+                if !window.Document().is_fully_active() {
+                    println!("Not fully active");
+                    return;
                 }
 
                 rooted!(in(*cx) let mut undef = UndefinedValue());
@@ -409,6 +414,8 @@ unsafe extern "C" fn cleanup_finalization_registry(
                         undef.handle_mut());
                 }
                 global.set_has_finalization_callback_queued(false);
+                window.resolve_gc_promise();
+                println!("run_cleanup_callbacks");
             }));
         global.set_has_finalization_callback_queued(true);
     }

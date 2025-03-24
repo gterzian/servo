@@ -37,6 +37,7 @@ use js::conversions::ToJSValConvertible;
 use js::glue::DumpJSStack;
 use js::jsapi::{
     GCReason, Heap, JS_GC, JSAutoRealm, JSContext as RawJSContext, JSObject, JSPROP_ENUMERATE,
+    NonIncrementalGC, GCOptions,
 };
 use js::jsval::{NullValue, UndefinedValue};
 use js::rust::wrappers::JS_DefineProperty;
@@ -393,9 +394,19 @@ pub(crate) struct Window {
 
     /// <https://dom.spec.whatwg.org/#window-current-event>
     current_event: DomRefCell<Option<Dom<Event>>>,
+    
+    #[ignore_malloc_size_of = "Rc is hard"]
+    gc_promise: DomRefCell<Option<Rc<Promise>>>,
 }
 
 impl Window {
+    // Note: move all of this to globalscope so that it can be used in workers.
+    pub(crate) fn resolve_gc_promise(&self) {
+        if let Some(promise) = self.gc_promise.borrow_mut().take() {
+            promise.resolve_native(&(), CanGc::note());
+        }
+    }
+    
     pub(crate) fn webview_id(&self) -> WebViewId {
         self.webview_id
     }
@@ -1202,10 +1213,23 @@ impl WindowMethods<crate::DomTypeHolder> for Window {
     }
 
     #[allow(unsafe_code)]
-    fn Gc(&self) {
-        unsafe {
-            JS_GC(*self.get_cx(), GCReason::API);
-        }
+    fn Gc(&self)  -> Rc<Promise> {
+        println!("GC");
+        let promise = Promise::new(&self.global(), CanGc::note());
+        *self.gc_promise.borrow_mut() = Some(promise.clone());
+        let this = Trusted::new(self);
+        let task = task!(window_close_browsing_context: move || {
+            let window = this.root();
+            unsafe {
+                JS_GC(*window.get_cx(), GCReason::API);
+                //NonIncrementalGC(*window.get_cx(), GCOptions::Normal, GCReason::API);
+            }
+        });
+        self.as_global_scope()
+            .task_manager()
+            .dom_manipulation_task_source()
+            .queue(task);
+        promise
     }
 
     #[allow(unsafe_code)]
@@ -2889,6 +2913,7 @@ impl Window {
             layout_marker: DomRefCell::new(Rc::new(Cell::new(true))),
             current_event: DomRefCell::new(None),
             theme: Cell::new(PrefersColorScheme::Light),
+            gc_promise: DomRefCell::new(None),
         });
 
         unsafe {

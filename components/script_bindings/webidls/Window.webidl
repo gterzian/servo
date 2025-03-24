@@ -138,8 +138,7 @@ partial interface Window {
 partial interface Window {
   [Pref="dom_servo_helpers_enabled"]
   undefined debug(DOMString arg);
-  [Pref="dom_servo_helpers_enabled"]
-  undefined gc();
+  Promise<undefined> gc();
   [Pref="dom_servo_helpers_enabled"]
   undefined js_backtrace();
 };
