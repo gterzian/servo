@@ -555,6 +555,7 @@ enum ToFetchThreadMessage {
         /* request_builder */ RequestBuilder,
         /* response_init */ Option<ResponseInit>,
         /* callback  */ BoxedFetchCallback,
+        CoreResourceThread,
     ),
     FetchResponse(FetchResponseMsg),
     /// Stop the background thread.
@@ -569,7 +570,7 @@ pub type BoxedFetchCallback = Box<dyn FnMut(FetchResponseMsg) + Send + 'static>;
 struct FetchThread {
     /// A list of active fetches. A fetch is no longer active once the
     /// [`FetchResponseMsg::ProcessResponseEOF`] is received.
-    active_fetches: HashMap<RequestId, BoxedFetchCallback>,
+    active_fetches: HashMap<RequestId, (BoxedFetchCallback, CoreResourceThread)>,
     /// A reference to the [`CoreResourceThread`] used to kick off fetch requests.
     core_resource_thread: CoreResourceThread,
     /// A crossbeam receiver attached to the router proxy which converts incoming fetch
@@ -616,8 +617,8 @@ impl FetchThread {
     fn run(&mut self) {
         loop {
             match self.receiver.recv().unwrap() {
-                ToFetchThreadMessage::StartFetch(request_builder, response_init, callback) => {
-                    self.active_fetches.insert(request_builder.id, callback);
+                ToFetchThreadMessage::StartFetch(request_builder, response_init, callback, core_resource_thread) => {
+                    self.active_fetches.insert(request_builder.id, (callback, core_resource_thread.clone()));
 
                     // Only redirects have a `response_init` field.
                     let message = match response_init {
@@ -632,7 +633,7 @@ impl FetchThread {
                         ),
                     };
 
-                    self.core_resource_thread.send(message).unwrap();
+                    core_resource_thread.send(message).unwrap();
                 },
                 ToFetchThreadMessage::FetchResponse(fetch_response_msg) => {
                     let request_id = fetch_response_msg.request_id();
@@ -641,7 +642,7 @@ impl FetchThread {
 
                     self.active_fetches
                         .get_mut(&request_id)
-                        .expect("Got fetch response for unknown fetch")(
+                        .expect("Got fetch response for unknown fetch").0(
                         fetch_response_msg
                     );
 
@@ -690,6 +691,7 @@ pub fn fetch_async(
     request: RequestBuilder,
     response_init: Option<ResponseInit>,
     callback: BoxedFetchCallback,
+    core_resource_thread: &CoreResourceThread,
 ) {
     let _ = FETCH_THREAD
         .get()
@@ -698,6 +700,7 @@ pub fn fetch_async(
             request,
             response_init,
             callback,
+            core_resource_thread.clone()
         ));
 }
 
