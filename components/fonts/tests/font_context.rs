@@ -54,7 +54,7 @@ mod font_context {
             let mock_compositor_api = CrossProcessCompositorApi::dummy();
 
             let proxy_clone = Arc::new(system_font_service_proxy.to_sender().to_proxy());
-            let fetch_thread_join_handle = start_fetch_thread(mock_resource_threads);
+            let fetch_thread_join_handle = start_fetch_thread();
             Self {
                 context: FontContext::new(proxy_clone, mock_compositor_api, mock_resource_threads),
                 system_font_service,
