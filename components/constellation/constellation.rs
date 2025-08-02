@@ -458,6 +458,9 @@ pub struct Constellation<STF, SWF> {
 
     /// The process manager.
     process_manager: ProcessManager,
+
+    /// When in single-process mode, join handles for script-threads.
+    script_join_handles: Vec<JoinHandle<()>>,
 }
 
 /// State needed to construct a constellation.
@@ -704,6 +707,7 @@ where
                     rippy_data,
                     user_content_manager: state.user_content_manager,
                     process_manager: ProcessManager::new(state.mem_profiler_chan),
+                    script_join_handles: Default::default(),
                 };
 
                 constellation.run();
@@ -963,6 +967,10 @@ where
 
         if let Some(chan) = pipeline.bhm_control_chan {
             self.background_monitor_control_senders.push(chan);
+        }
+
+        if let Some(join_handle) = pipeline.join_handle {
+            self.script_join_handles.push(join_handle);
         }
 
         if let Some(host) = host {
@@ -2515,6 +2523,13 @@ where
     #[servo_tracing::instrument(skip_all)]
     fn handle_shutdown(&mut self) {
         debug!("Handling shutdown.");
+
+        // In single process mode, join on script-threads
+        for join_handle in self.script_join_handles.drain(..) {
+            join_handle
+                .join()
+                .expect("Failed to join on a script-thread.");
+        }
 
         // In single process mode, join on the background hang monitor worker thread.
         drop(self.background_monitor_register.take());
