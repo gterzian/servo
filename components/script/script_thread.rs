@@ -2043,6 +2043,9 @@ impl ScriptThread {
                     );
                 }
             },
+            ScriptThreadMessage::RequestPageAnchors(pipeline_id) => {
+                self.handle_request_page_anchors(pipeline_id);
+            },
         }
     }
 
@@ -4106,6 +4109,12 @@ impl ScriptThread {
             pipeline_id,
             ScriptToConstellationMessage::FinishJavaScriptEvaluation(evaluation_id, result),
         ));
+    }
+
+    fn handle_request_page_anchors(&self, pipeline_id: PipelineId) {
+        if let Some(document) = self.documents.borrow().find_document(pipeline_id) {
+            document.extract_and_send_anchor_urls();
+        }
     }
 }
 

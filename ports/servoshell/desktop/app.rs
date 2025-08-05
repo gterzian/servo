@@ -199,6 +199,7 @@ impl App {
             window.clone(),
             self.servoshell_preferences.clone(),
             webdriver_receiver,
+            self.waker.clone(),
         ));
         running_state.create_and_focus_toplevel_webview(self.initial_url.clone().into_url());
         if let Some(ref mut minibrowser) = self.minibrowser {
@@ -236,7 +237,12 @@ impl App {
                 need_window_redraw,
             } => {
                 let updated = match (update, &mut self.minibrowser) {
-                    (true, Some(minibrowser)) => minibrowser.update_webview_data(state),
+                    (true, Some(minibrowser)) => {
+                        // Update the minibrowser with webview data
+                        let webview_updated = minibrowser.update_webview_data(state);
+
+                        webview_updated
+                    },
                     _ => false,
                 };
 
@@ -331,6 +337,24 @@ impl App {
                 MinibrowserEvent::CloseWebView(id) => {
                     minibrowser.update_location_dirty(false);
                     state.close_webview(id);
+                },
+                MinibrowserEvent::LLMInput(text) => {
+                    // Send input to the LLM.
+                    state.send_llm_message(text);
+                },
+                MinibrowserEvent::AddressBarInput(text) => {
+                    // Send to LLM for URL prediction.
+                    if let Some(focused_webview) = state.focused_webview() {
+                        state.send_url_input(focused_webview.id(), text);
+                    }
+                },
+                MinibrowserEvent::RequestAnimation => {
+                    // Request repaint for animation (e.g., spinner)
+                    state.request_repaint();
+                },
+                MinibrowserEvent::ClearUrlPredictions => {
+                    // Clear URL predictions from app state
+                    state.clear_url_predictions_for_focused_webview();
                 },
             }
         }

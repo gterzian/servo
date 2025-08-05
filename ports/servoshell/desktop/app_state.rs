@@ -7,7 +7,9 @@ use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::mpsc::TryRecvError;
 
+use constellation_traits::EmbedderToConstellationMessage;
 use crossbeam_channel::Receiver;
 use euclid::Vector2D;
 use keyboard_types::{Key, Modifiers, NamedKey, ShortcutMatcher};
@@ -18,7 +20,7 @@ use servo::ipc_channel::ipc::IpcSender;
 use servo::webrender_api::ScrollLocation;
 use servo::webrender_api::units::{DeviceIntPoint, DeviceIntSize};
 use servo::{
-    AllowOrDenyRequest, AuthenticationRequest, FilterPattern, FocusId, FormControl,
+    AllowOrDenyRequest, AuthenticationRequest, EventLoopWaker, FilterPattern, FocusId, FormControl,
     GamepadHapticEffectType, KeyboardEvent, LoadStatus, PermissionRequest, Servo, ServoDelegate,
     ServoError, SimpleDialog, TraversalId, WebDriverCommandMsg, WebDriverJSResult,
     WebDriverJSValue, WebDriverLoadStatus, WebDriverUserPrompt, WebView, WebViewBuilder,
@@ -30,6 +32,7 @@ use super::app::PumpResult;
 use super::dialog::Dialog;
 use super::gamepad::GamepadSupport;
 use super::keyutils::CMD_OR_CONTROL;
+use super::ollama_client::{self, BrowserAction, OllamaHandle, OllamaResponse};
 use super::window_trait::{LINE_HEIGHT, LINE_WIDTH, WindowPortsMethods};
 use crate::output_image::save_output_image_if_necessary;
 use crate::prefs::ServoShellPreferences;
@@ -87,16 +90,29 @@ pub struct RunningAppStateInner {
     /// Gamepad support, which may be `None` if it failed to initialize.
     gamepad_support: Option<GamepadSupport>,
 
+    /// Ollama client support, which may be `None` if not on macOS or if it failed to initialize.
+    ollama_client: Option<OllamaHandle>,
+
     /// Whether or not the application interface needs to be updated.
     need_update: bool,
 
     /// Whether or not Servo needs to repaint its display. Currently this is global
     /// because every `WebView` shares a `RenderingContext`.
     need_repaint: bool,
+
+    /// URL predictions for webviews, mapped by WebViewId
+    url_predictions: HashMap<WebViewId, (String, Vec<String>)>, // (input, predicted_urls)
+
+    /// Pending URL predictions for webviews, mapped by WebViewId  
+    pending_url_predictions: HashMap<WebViewId, String>, // webview_id -> input_text
 }
 
 impl Drop for RunningAppState {
     fn drop(&mut self) {
+        // Wait for ollama client thread to finish
+        if let Some(mut ollama_client) = self.inner_mut().ollama_client.take() {
+            ollama_client.join();
+        }
         self.servo.deinit();
     }
 }
@@ -107,6 +123,7 @@ impl RunningAppState {
         window: Rc<dyn WindowPortsMethods>,
         servoshell_preferences: ServoShellPreferences,
         webdriver_receiver: Option<Receiver<WebDriverCommandMsg>>,
+        event_loop_waker: Box<dyn EventLoopWaker>,
     ) -> RunningAppState {
         servo.set_delegate(Rc::new(ServoShellServoDelegate));
         RunningAppState {
@@ -121,8 +138,11 @@ impl RunningAppState {
                 dialogs: Default::default(),
                 window,
                 gamepad_support: GamepadSupport::maybe_new(),
+                ollama_client: ollama_client::start_ollama_client(event_loop_waker),
                 need_update: false,
                 need_repaint: false,
+                url_predictions: HashMap::new(),
+                pending_url_predictions: HashMap::new(),
             }),
         }
     }
@@ -138,6 +158,32 @@ impl RunningAppState {
             .url(url)
             .hidpi_scale_factor(self.inner().window.hidpi_scale_factor())
             .delegate(self.clone())
+            .build();
+
+        webview.notify_theme_change(self.inner().window.theme());
+        self.add(webview.clone());
+        webview
+    }
+
+    /// Creates and focuses a new webview for browser actions using the delegate from an existing focused webview.
+    pub(crate) fn create_and_focus_new_webview_for_browser_action(&self, url: Url) {
+        let webview = self.create_new_webview_for_browser_action(url);
+        webview.focus();
+        webview.raise_to_top(true);
+    }
+
+    pub(crate) fn create_new_webview_for_browser_action(&self, url: Url) -> WebView {
+        let delegate = self
+            .focused_webview()
+            .expect(
+                "There should be a focused webview when creating a new webview from browser action",
+            )
+            .delegate();
+
+        let webview = WebViewBuilder::new(self.servo())
+            .url(url)
+            .hidpi_scale_factor(self.inner().window.hidpi_scale_factor())
+            .delegate(delegate)
             .build();
 
         webview.notify_theme_change(self.inner().window.theme());
@@ -199,14 +245,24 @@ impl RunningAppState {
         }
     }
 
+    /// Request a repaint (e.g., for animations)
+    pub(crate) fn request_repaint(&self) {
+        self.inner_mut().need_repaint = true;
+    }
+
     /// Spins the internal application event loop.
     ///
     /// - Notifies Servo about incoming gamepad events
+    /// - Handle ollama client events
     /// - Spin the Servo event loop, which will run the compositor and trigger delegate methods.
     pub(crate) fn pump_event_loop(&self) -> PumpResult {
         if pref!(dom_gamepad_enabled) {
             self.handle_gamepad_events();
         }
+
+        // Handle ollama client events (only on macOS)
+        #[cfg(target_os = "macos")]
+        self.handle_ollama_events();
 
         if !self.servo().spin_event_loop() {
             return PumpResult::Shutdown;
@@ -229,6 +285,10 @@ impl RunningAppState {
     }
 
     pub(crate) fn shutdown(&self) {
+        // Signal ollama client to exit
+        if let Some(ollama_client) = &self.inner().ollama_client {
+            ollama_client.send_exit();
+        }
         self.inner_mut().webviews.clear();
     }
 
@@ -308,6 +368,46 @@ impl RunningAppState {
         };
         if let Some(gamepad_support) = self.inner_mut().gamepad_support.as_mut() {
             gamepad_support.handle_gamepad_events(active_webview);
+        }
+    }
+
+    pub fn handle_ollama_events(&self) {
+        loop {
+            // Get the response without holding a borrow on inner
+            let response = {
+                let inner = self.inner();
+                if let Some(ollama_client) = &inner.ollama_client {
+                    ollama_client.try_recv_response()
+                } else {
+                    return; // No ollama client
+                }
+            };
+
+            match response {
+                Ok(response) => match response {
+                    OllamaResponse::BrowserAction(action) => {
+                        self.handle_browser_action(action);
+                    },
+                    OllamaResponse::UrlPrediction {
+                        webview_id,
+                        input,
+                        predicted_urls,
+                    } => {
+                        self.handle_url_prediction(webview_id, input, predicted_urls);
+                    },
+                    OllamaResponse::RequestAnchors { webview_id } => {
+                        self.handle_request_anchors(webview_id);
+                    },
+                    OllamaResponse::Error(error) => {
+                        eprintln!("Ollama client error: {}", error);
+                    },
+                },
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    eprintln!("Ollama client disconnected");
+                    break;
+                },
+            }
         }
     }
 
@@ -521,6 +621,134 @@ impl RunningAppState {
             .load_status_senders
             .remove(&webview_id);
     }
+
+    /// Send a message to the LLM via ollama client
+    pub(crate) fn send_llm_message(&self, message: String) {
+        if let Some(ollama_client) = &self.inner().ollama_client {
+            ollama_client.send_user_message(message);
+        }
+    }
+
+    /// Send URL input to the LLM via ollama client
+    pub(crate) fn send_url_input(&self, webview_id: WebViewId, input: String) {
+        // First check if we have an ollama client before borrowing mutably
+        let has_ollama_client = self.inner().ollama_client.is_some();
+
+        if has_ollama_client {
+            // Get current URL from the webview
+            let current_url = self
+                .webview_by_id(webview_id)
+                .and_then(|webview| webview.url())
+                .map(|url| url.to_string())
+                .unwrap_or_default();
+
+            // Update pending state
+            self.inner_mut()
+                .pending_url_predictions
+                .insert(webview_id, input.clone());
+
+            // Send the input (get the client reference in a separate borrow)
+            if let Some(ollama_client) = &self.inner().ollama_client {
+                ollama_client.send_url_input(webview_id, input, current_url);
+            }
+        }
+    }
+
+    /// Send anchor URLs to the ollama client
+    pub(crate) fn send_anchor_urls(
+        &self,
+        webview_id: WebViewId,
+        anchor_urls: Vec<servo::servo_url::ServoUrl>,
+    ) {
+        if let Some(ollama_client) = &self.inner().ollama_client {
+            ollama_client.send_anchor_urls(webview_id, anchor_urls);
+        }
+    }
+
+    /// Get URL prediction state for the focused webview
+    pub(crate) fn get_url_prediction_state_for_focused_webview(
+        &self,
+    ) -> Option<(String, Vec<String>)> {
+        if let Some(webview) = self.focused_webview() {
+            let inner = self.inner();
+            inner.url_predictions.get(&webview.id()).cloned()
+        } else {
+            None
+        }
+    }
+
+    /// Check if there are pending URL predictions for the focused webview
+    pub(crate) fn has_pending_url_predictions(&self) -> bool {
+        if let Some(webview) = self.focused_webview() {
+            let inner = self.inner();
+            inner.pending_url_predictions.contains_key(&webview.id())
+        } else {
+            false
+        }
+    }
+
+    /// Clear URL predictions and pending state for the focused webview
+    pub(crate) fn clear_url_predictions_for_focused_webview(&self) {
+        if let Some(webview) = self.focused_webview() {
+            let mut inner = self.inner_mut();
+            inner.url_predictions.remove(&webview.id());
+            inner.pending_url_predictions.remove(&webview.id());
+        }
+    }
+
+    /// Handle browser action from ollama client
+    fn handle_browser_action(&self, action: BrowserAction) {
+        match action {
+            BrowserAction::Navigate(urls) => {
+                for url_str in urls {
+                    let res = url::Url::parse(&url_str);
+                    match res {
+                        Ok(url) => {
+                            self.create_and_focus_new_webview_for_browser_action(url);
+                        },
+                        Err(_e) => {
+                            // Failed to parse URL, ignore
+                        },
+                    }
+                }
+            },
+            BrowserAction::Close => {
+                let webview_ids: Vec<_> = self.inner().webviews.keys().copied().collect();
+                for webview_id in webview_ids {
+                    self.close_webview(webview_id);
+                }
+            },
+            BrowserAction::Nothing => {
+                // LLM returned no action
+            },
+        }
+    }
+
+    /// Handle URL prediction from ollama client
+    fn handle_url_prediction(
+        &self,
+        webview_id: WebViewId,
+        input: String,
+        predicted_urls: Vec<String>,
+    ) {
+        // Store the predictions and input in the inner state storage and trigger UI update
+        let mut inner = self.inner_mut();
+        inner
+            .url_predictions
+            .insert(webview_id, (input, predicted_urls));
+        // Clear pending state since we now have actual predictions
+        inner.pending_url_predictions.remove(&webview_id);
+        inner.need_update = true;
+    }
+
+    fn handle_request_anchors(&self, webview_id: WebViewId) {
+        // Send the request to constellation
+        if let Err(e) = self.servo.constellation_sender().send(
+            EmbedderToConstellationMessage::RequestPageAnchors(webview_id),
+        ) {
+            eprintln!("Failed to send RequestPageAnchors message: {}", e);
+        }
+    }
 }
 
 struct ServoShellServoDelegate;
@@ -692,6 +920,15 @@ impl WebViewDelegate for RunningAppState {
                 let _ = sender.send(WebDriverLoadStatus::Complete);
             }
         }
+    }
+
+    fn notify_page_anchor_urls(
+        &self,
+        webview: servo::WebView,
+        anchor_urls: Vec<servo::servo_url::ServoUrl>,
+    ) {
+        // Send the URLs to the ollama client with the webview ID
+        self.send_anchor_urls(webview.id(), anchor_urls);
     }
 
     fn notify_fullscreen_state_changed(&self, _webview: servo::WebView, fullscreen_state: bool) {

@@ -78,6 +78,7 @@ mod from_compositor {
                 Self::CreateMemoryReport(..) => target!("CreateMemoryReport"),
                 Self::SendImageKeysForPipeline(..) => target!("SendImageKeysForPipeline"),
                 Self::SetWebDriverResponseSender(..) => target!("SetWebDriverResponseSender"),
+                Self::RequestPageAnchors(..) => target!("RequestPageAnchors"),
             }
         }
     }
@@ -249,6 +250,7 @@ mod from_script {
                 Self::FinishJavaScriptEvaluation(..) => {
                     target_variant!("FinishJavaScriptEvaluation")
                 },
+                Self::PageAnchorUrls { .. } => target_variant!("PageAnchorUrls"),
             }
         }
     }

@@ -14,6 +14,7 @@ use embedder_traits::{
 };
 use ipc_channel::ipc::IpcSender;
 use serde::Serialize;
+use servo_url::ServoUrl;
 use url::Url;
 use webrender_api::units::{DeviceIntPoint, DeviceIntRect, DeviceIntSize};
 
@@ -429,6 +430,8 @@ pub trait WebViewDelegate {
     /// The `LoadStatus` of the currently loading or loaded page in this [`WebView`] has changed. The new
     /// status can accessed via [`WebView::load_status`].
     fn notify_load_status_changed(&self, _webview: WebView, _status: LoadStatus) {}
+    /// Page anchor URLs were extracted when a page finished loading.
+    fn notify_page_anchor_urls(&self, _webview: WebView, _anchor_urls: Vec<ServoUrl>) {}
     /// The [`Cursor`] of the currently loaded page in this [`WebView`] has changed. The new
     /// cursor can accessed via [`WebView::cursor`].
     fn notify_cursor_changed(&self, _webview: WebView, _: Cursor) {}

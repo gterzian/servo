@@ -100,6 +100,8 @@ pub enum EmbedderToConstellationMessage {
     SendImageKeysForPipeline(PipelineId, Vec<ImageKey>),
     /// Set WebDriver input event handled sender.
     SetWebDriverResponseSender(IpcSender<WebDriverCommandResponse>),
+    /// Request the anchor URLs from a specific WebView for conversational features.
+    RequestPageAnchors(WebViewId),
 }
 
 /// A description of a paint metric that is sent from the Servo renderer to the

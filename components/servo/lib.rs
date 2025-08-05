@@ -445,7 +445,7 @@ impl Servo {
 
         let constellation_chan = create_constellation(
             opts.config_dir.clone(),
-            embedder_proxy,
+            embedder_proxy.clone(),
             compositor_proxy.clone(),
             time_profiler_chan.clone(),
             mem_profiler_chan.clone(),
@@ -486,6 +486,7 @@ impl Servo {
         );
 
         let constellation_proxy = ConstellationProxy::new(constellation_chan);
+
         Self {
             delegate: RefCell::new(Rc::new(DefaultServoDelegate)),
             compositor: Rc::new(RefCell::new(compositor)),
@@ -645,11 +646,13 @@ impl Servo {
         debug!("Sending Exit message to Constellation");
         self.constellation_proxy
             .send(EmbedderToConstellationMessage::Exit);
+
         self.shutdown_state.set(ShutdownState::ShuttingDown);
     }
 
     fn finish_shutting_down(&self) {
         debug!("Servo received message that Constellation shutdown is complete");
+
         self.shutdown_state.set(ShutdownState::FinishedShuttingDown);
         self.compositor.borrow_mut().finish_shutting_down();
     }
@@ -1048,6 +1051,16 @@ impl Servo {
                 };
                 if let Err(error) = response_sender.send(screen_metrics()) {
                     warn!("Failed to respond to GetScreenMetrics: {error}");
+                }
+            },
+            EmbedderMsg::PageAnchorUrls {
+                webview_id,
+                anchor_urls,
+            } => {
+                if let Some(webview) = self.get_webview_handle(webview_id) {
+                    webview
+                        .delegate()
+                        .notify_page_anchor_urls(webview, anchor_urls);
                 }
             },
         }

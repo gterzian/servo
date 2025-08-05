@@ -253,6 +253,8 @@ pub enum ScriptThreadMessage {
     EvaluateJavaScript(PipelineId, JavaScriptEvaluationId, String),
     /// A new batch of keys for the image cache for the specific pipeline.
     SendImageKeysBatch(PipelineId, Vec<ImageKey>),
+    /// Request to extract anchor URLs from the document.
+    RequestPageAnchors(PipelineId),
 }
 
 impl fmt::Debug for ScriptThreadMessage {

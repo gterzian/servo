@@ -17,6 +17,7 @@ mod headed_window;
 mod headless_window;
 mod keyutils;
 mod minibrowser;
+mod ollama_client;
 mod protocols;
 mod tracing;
 mod webxr;

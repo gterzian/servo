@@ -49,6 +49,15 @@ pub struct Minibrowser {
     load_status: LoadStatus,
 
     status_text: Option<String>,
+
+    // Add the new text input field
+    bottom_text_input: RefCell<String>,
+
+    /// Stores the current URL predictions for the address bar
+    predicted_urls: RefCell<Option<Vec<String>>>,
+
+    /// Stores the input text that the current predictions were made for
+    prediction_input: RefCell<Option<String>>,
 }
 
 pub enum MinibrowserEvent {
@@ -59,6 +68,15 @@ pub enum MinibrowserEvent {
     Reload,
     NewWebView,
     CloseWebView(WebViewId),
+    /// LLM input submitted.
+    LLMInput(String),
+    /// Address bar text changed.
+    AddressBarInput(String),
+    /// User clicked on a predicted URL.
+    /// Request animation/repaint (e.g., for spinner).
+    RequestAnimation,
+    /// Clear URL predictions.
+    ClearUrlPredictions,
 }
 
 fn truncate_with_ellipsis(input: &str, max_length: usize) -> String {
@@ -111,6 +129,12 @@ impl Minibrowser {
             location_dirty: false.into(),
             load_status: LoadStatus::Complete,
             status_text: None,
+            // Initialize the new text input field
+            bottom_text_input: RefCell::new(String::new()),
+            // Initialize URL prediction tracking
+            predicted_urls: RefCell::new(None),
+            // Initialize prediction input tracking
+            prediction_input: RefCell::new(None),
         }
     }
 
@@ -287,6 +311,10 @@ impl Minibrowser {
             last_update,
             location,
             location_dirty,
+            bottom_text_input,
+            predicted_urls,
+            prediction_input,
+            load_status,
             ..
         } = self;
 
@@ -309,7 +337,7 @@ impl Minibrowser {
                                 event_queue.borrow_mut().push(MinibrowserEvent::Forward);
                             }
 
-                            match self.load_status {
+                            match *load_status {
                                 LoadStatus::Started | LoadStatus::HeadParsed => {
                                     if ui.add(Minibrowser::toolbar_button("X")).clicked() {
                                         warn!("Do not support stop yet.");
@@ -328,14 +356,32 @@ impl Minibrowser {
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
                                     let location_id = egui::Id::new("location_input");
-                                    let location_field = ui.add_sized(
-                                        ui.available_size(),
-                                        egui::TextEdit::singleline(&mut *location.borrow_mut())
-                                            .id(location_id),
-                                    );
+
+                                    // Get current location text
+                                    let mut location_binding = location.borrow_mut();
+
+                                    let text_edit =
+                                        egui::TextEdit::singleline(&mut *location_binding)
+                                            .id(location_id);
+
+                                    let location_field =
+                                        ui.add_sized(ui.available_size(), text_edit);
+
+                                    // Release the borrow before continuing
+                                    drop(location_binding);
 
                                     if location_field.changed() {
                                         location_dirty.set(true);
+                                        // Clear any existing predictions when user types
+                                        *predicted_urls.borrow_mut() = None;
+                                        *prediction_input.borrow_mut() = None;
+                                        // Send address bar input event immediately
+                                        let current_text = location.borrow().clone();
+                                        if current_text.trim().len() > 1 {
+                                            event_queue.borrow_mut().push(
+                                                MinibrowserEvent::AddressBarInput(current_text),
+                                            );
+                                        }
                                     }
                                     // Handle adddress bar shortcut.
                                     if ui.input(|i| {
@@ -377,6 +423,64 @@ impl Minibrowser {
                 });
             };
 
+            // URL predictions dropdown below address bar
+            let has_pending = state.has_pending_url_predictions();
+            let predictions = predicted_urls.borrow().clone();
+            let prediction_input_text = prediction_input.borrow().clone();
+            let current_location_text = location.borrow().clone();
+
+            // Only show predictions if they match the current input or if we have pending predictions
+            let should_show_predictions = has_pending ||
+                (predictions.is_some() &&
+                    !predictions.as_ref().unwrap().is_empty() &&
+                    prediction_input_text.as_ref() == Some(&current_location_text));
+
+            if should_show_predictions {
+                TopBottomPanel::top("url_predictions")
+                    .frame(
+                        egui::Frame::default()
+                            .fill(ctx.style().visuals.window_fill)
+                            .inner_margin(4.0)
+                            .stroke(egui::Stroke::new(1.0, ctx.style().visuals.faint_bg_color)),
+                    )
+                    .show(ctx, |ui| {
+                        ui.vertical(|ui| {
+                            if has_pending {
+                                // Show spinning indicator or "pending..." text
+                                ui.horizontal(|ui| {
+                                    ui.spinner();
+                                    ui.label("Predicting URLs...");
+                                });
+                                // Request animation for the spinner
+                                event_queue
+                                    .borrow_mut()
+                                    .push(MinibrowserEvent::RequestAnimation);
+                            } else if let Some(predicted_urls_vec) = predictions.as_ref() {
+                                for predicted_url in predicted_urls_vec.iter() {
+                                    if ui.button(predicted_url).clicked() {
+                                        // Immediately update the address bar to show the selected URL
+                                        *location.borrow_mut() = predicted_url.clone();
+                                        location_dirty.set(false);
+
+                                        // Clear predictions to hide the dropdown immediately
+                                        *predicted_urls.borrow_mut() = None;
+                                        *prediction_input.borrow_mut() = None;
+
+                                        // Clear predictions from app state too
+                                        event_queue
+                                            .borrow_mut()
+                                            .push(MinibrowserEvent::ClearUrlPredictions);
+
+                                        event_queue
+                                            .borrow_mut()
+                                            .push(MinibrowserEvent::Go(predicted_url.clone()));
+                                    }
+                                }
+                            }
+                        });
+                    });
+            }
+
             // A simple Tab header strip
             TopBottomPanel::top("tabs").show(ctx, |ui| {
                 ui.allocate_ui_with_layout(
@@ -393,7 +497,36 @@ impl Minibrowser {
                 );
             });
 
-            // The toolbar height is where the Context’s available rect starts.
+            // Add the new bottom panel with simple text input
+            TopBottomPanel::bottom("llm_input").show(ctx, |ui| {
+                ui.allocate_ui_with_layout(
+                    ui.available_size(),
+                    egui::Layout::top_down(egui::Align::LEFT),
+                    |ui| {
+                        // Text input area
+                        ui.label("Ask the LLM:");
+                        let text_edit = ui.add_sized(
+                            [ui.available_width(), 60.0], // Make it 60 pixels tall
+                            egui::TextEdit::multiline(&mut *bottom_text_input.borrow_mut())
+                                .hint_text("Type your question and press Enter..."),
+                        );
+
+                        // Handle Enter key press
+                        if text_edit.has_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+                            let text = bottom_text_input.borrow().clone();
+                            if !text.trim().is_empty() {
+                                // Send LLMInput event instead of calling ollama directly
+                                event_queue
+                                    .borrow_mut()
+                                    .push(MinibrowserEvent::LLMInput(text));
+
+                                // Clear the input after sending
+                                bottom_text_input.replace(String::new());
+                            }
+                        }
+                    },
+                );
+            }); // The toolbar height is where the Context’s available rect starts.
             // For reasons that are unclear, the TopBottomPanel’s ui cursor exceeds this by one egui
             // point, but the Context is correct and the TopBottomPanel is wrong.
             *toolbar_height = Length::new(ctx.available_rect().min.y);
@@ -513,13 +646,33 @@ impl Minibrowser {
     /// Updates all fields taken from the given [WebViewManager], such as the location field.
     /// Returns true iff the egui needs an update.
     pub fn update_webview_data(&mut self, state: &RunningAppState) -> bool {
+        // Update URL prediction from the app state
+        let new_prediction_data = state.get_url_prediction_state_for_focused_webview();
+        let old_predictions = self.predicted_urls.borrow().clone();
+        let old_input = self.prediction_input.borrow().clone();
+
+        // Extract new values or use None
+        let (new_predictions, new_input) = match new_prediction_data {
+            Some((input, predicted_urls)) => (Some(predicted_urls), Some(input)),
+            None => (None, None),
+        };
+
+        // Update stored values
+        *self.predicted_urls.borrow_mut() = new_predictions;
+        *self.prediction_input.borrow_mut() = new_input;
+
+        // Check if anything changed
+        let prediction_changed = old_predictions != *self.predicted_urls.borrow() ||
+            old_input != *self.prediction_input.borrow();
+
         // Note: We must use the "bitwise OR" (|) operator here instead of "logical OR" (||)
         //       because logical OR would short-circuit if any of the functions return true.
         //       We want to ensure that all functions are called. The "bitwise OR" operator
         //       does not short-circuit.
         self.update_location_in_toolbar(state) |
             self.update_load_status(state) |
-            self.update_status_text(state)
+            self.update_status_text(state) |
+            prediction_changed
     }
 
     /// Returns true if a redraw is required after handling the provided event.

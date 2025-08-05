@@ -481,6 +481,13 @@ pub enum EmbedderMsg {
         JavaScriptEvaluationId,
         Result<JSValue, JavaScriptEvaluationError>,
     ),
+    /// Page anchor URLs extracted when a page finishes loading.
+    PageAnchorUrls {
+        /// The WebView that finished loading
+        webview_id: WebViewId,
+        /// All anchor URLs found on the page
+        anchor_urls: Vec<ServoUrl>,
+    },
 }
 
 impl Debug for EmbedderMsg {

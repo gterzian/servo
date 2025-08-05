@@ -1483,6 +1483,9 @@ where
             EmbedderToConstellationMessage::SetWebDriverResponseSender(sender) => {
                 self.webdriver_input_command_reponse_sender = Some(sender);
             },
+            EmbedderToConstellationMessage::RequestPageAnchors(webview_id) => {
+                self.handle_request_page_anchors(webview_id);
+            },
         }
     }
 
@@ -5568,5 +5571,45 @@ where
             self.system_font_service.clone(),
             self.public_resource_threads.clone(),
         )
+    }
+
+    #[servo_tracing::instrument(skip_all)]
+    fn handle_request_page_anchors(&self, webview_id: WebViewId) {
+        // Find the active browsing context for this webview
+        let browsing_context_id = match self.webviews.get(webview_id) {
+            Some(webview) => webview.focused_browsing_context_id,
+            None => {
+                warn!("RequestPageAnchors: Unknown webview {:?}", webview_id);
+                return;
+            },
+        };
+
+        // Find the pipeline for the focused browsing context
+        if let Some(browsing_context) = self.browsing_contexts.get(&browsing_context_id) {
+            let active_pipeline_id = browsing_context.pipeline_id;
+
+            // Get the pipeline and send the request to script
+            if let Some(pipeline) = self.pipelines.get(&active_pipeline_id) {
+                if let Err(error) = pipeline
+                    .event_loop
+                    .send(ScriptThreadMessage::RequestPageAnchors(active_pipeline_id))
+                {
+                    warn!(
+                        "Could not send RequestPageAnchors to pipeline {:?}: {:?}",
+                        active_pipeline_id, error
+                    );
+                }
+            } else {
+                warn!(
+                    "RequestPageAnchors: Unknown pipeline {:?} for webview {:?}",
+                    active_pipeline_id, webview_id
+                );
+            }
+        } else {
+            warn!(
+                "RequestPageAnchors: Unknown browsing context {:?} for webview {:?}",
+                browsing_context_id, webview_id
+            );
+        }
     }
 }

@@ -161,6 +161,7 @@ use crate::dom::htmlembedelement::HTMLEmbedElement;
 use crate::dom::htmlformelement::{FormControl, FormControlElementHelpers, HTMLFormElement};
 use crate::dom::htmlheadelement::HTMLHeadElement;
 use crate::dom::htmlhtmlelement::HTMLHtmlElement;
+use crate::dom::htmlhyperlinkelementutils::HyperlinkElementTraits;
 use crate::dom::htmliframeelement::HTMLIFrameElement;
 use crate::dom::htmlimageelement::HTMLImageElement;
 use crate::dom::htmlinputelement::HTMLInputElement;
@@ -1134,6 +1135,51 @@ impl Document {
     // https://w3c.github.io/uievents/#events-focusevent-doc-focus
     pub(crate) fn get_focused_element(&self) -> Option<DomRoot<Element>> {
         self.focused.get()
+    }
+
+    /// Get all URLs from anchor elements in this document.
+    /// Returns a vector of ServoUrl for all anchor elements that have an href attribute.
+    pub(crate) fn get_anchor_urls(&self) -> Vec<ServoUrl> {
+        let mut urls = Vec::new();
+
+        if let Some(document_element) = self.GetDocumentElement() {
+            self.collect_anchor_urls_from_element(&document_element, &mut urls);
+        }
+
+        urls
+    }
+
+    /// Recursively collect URLs from anchor elements starting from the given element.
+    fn collect_anchor_urls_from_element(&self, element: &Element, urls: &mut Vec<ServoUrl>) {
+        // Check if this element is an anchor element with an href
+        if let Some(anchor) = element.downcast::<HTMLAnchorElement>() {
+            let href_usvstring = anchor.get_href();
+            let USVString(ref href) = href_usvstring;
+            if !href.is_empty() {
+                if let Ok(url) = self.encoding_parse_a_url(href) {
+                    urls.push(url);
+                }
+            }
+        }
+
+        // Recursively check all child elements
+        for child in element.upcast::<Node>().children() {
+            if let Some(child_element) = child.downcast::<Element>() {
+                self.collect_anchor_urls_from_element(child_element, urls);
+            }
+        }
+    }
+
+    /// Extract all anchor URLs and send them to the embedder on demand.
+    pub(crate) fn extract_and_send_anchor_urls(&self) {
+        let anchor_urls = self.get_anchor_urls();
+        if !anchor_urls.is_empty() {
+            let msg = EmbedderMsg::PageAnchorUrls {
+                webview_id: self.webview_id(),
+                anchor_urls,
+            };
+            self.send_to_embedder(msg);
+        }
     }
 
     /// Get the last sequence number sent to the constellation.
