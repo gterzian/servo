@@ -1014,7 +1014,7 @@ impl HTMLFormElement {
         // a `window.stop` should only cancel the navigation that have already started
         // (here the task is queued, but the nav starts only in the task).
         // See https://github.com/whatwg/html/issues/11562
-        let generation_id = target.ongoing_navigation();
+        let ongoing_navigation = target.set_ongoing_navigation();
 
         // Step 2
         let elem = self.upcast::<Element>();
@@ -1033,7 +1033,7 @@ impl HTMLFormElement {
         // Step 4.
         let window = Trusted::new(target);
         let task = task!(navigate_to_form_planned_navigation: move || {
-            if generation_id != window.root().ongoing_navigation() {
+            if ongoing_navigation != window.root().ongoing_navigation() {
                 return;
             }
             window

@@ -725,7 +725,7 @@ impl Window {
     }
 
     /// <https://html.spec.whatwg.org/multipage/#set-the-ongoing-navigation>
-    fn set_ongoing_navigation(&self) {
+    pub(crate) fn set_ongoing_navigation(&self) -> OngoingNavigation {
         // Note: since this value, for now, is only used in a single script-thread,
         // we just increment it(it is not a uuid).
         let new_value = self.ongoing_navigation.get().0 + 1;
@@ -737,6 +737,8 @@ impl Window {
 
         // Set navigable's ongoing navigation to newValue.
         self.ongoing_navigation.set(OngoingNavigation(new_value));
+
+        OngoingNavigation(new_value)
     }
 
     /// <https://html.spec.whatwg.org/multipage/#nav-stop>
@@ -754,7 +756,7 @@ impl Window {
         // 2. Send a `AbortLoadUrl` message(in case the navigation
         // already started at the constellation).
         self.set_ongoing_navigation();
-        self.send_to_constellation(ScriptToConstellationMessage::AbortLoadUrl);
+        //self.send_to_constellation(ScriptToConstellationMessage::AbortLoadUrl);
 
         // Abort a document and its descendants given document.
         doc.abort(can_gc);
