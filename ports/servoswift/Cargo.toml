@@ -1,0 +1,52 @@
+[package]
+name = "servoswift"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "servoswift"
+path = "lib.rs"
+crate-type = ["cdylib", "staticlib"]
+bench = false
+
+[build-dependencies]
+cbindgen = "0.24"
+
+[dependencies]
+cfg-if = { workspace = true }
+constellation_traits = { workspace = true }
+crossbeam-channel = { workspace = true }
+dpi = { workspace = true }
+embedder_traits = { path = "../../components/shared/embedder" }
+euclid = { workspace = true }
+libservo = { path = "../../components/servo", features = ["background_hang_monitor", "bluetooth"] }
+log = { workspace = true }
+raw-window-handle = { workspace = true }
+rustls = { workspace = true, features = ["aws-lc-rs"] }
+url = { workspace = true }
+webrender_api = { workspace = true }
+env_logger = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3.1", default-features = false, features = [
+    "std",
+    "NSColorSpace", 
+    "NSResponder",
+    "NSView",
+    "NSWindow",
+] }
+objc2-foundation = { version = "0.3.1", default-features = false, features = [
+    "std",
+] }
+objc2-metal = { version = "0.3.1", default-features = false, features = [
+    "std",
+] }
+
+[features]
+default = []
+webgpu = ["libservo/webgpu"]
+webxr = ["libservo/webxr"]

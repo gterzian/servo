@@ -1,0 +1,14 @@
+# cbindgen configuration for ServoSwift
+
+language = "C"
+
+[export]
+include = ["ServoError", "ServoInitOptions"]
+
+[export.rename]
+"ServoError" = "servo_error_t"
+"ServoInitOptions" = "servo_init_options_t"
+
+[parse]
+parse_deps = false
+clean = false
