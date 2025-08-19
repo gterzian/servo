@@ -53,11 +53,8 @@ public typealias ServoHandle = UInt64
 public typealias WebViewHandle = UInt64
 
 /// C function declarations
-@_silgen_name("servo_init")
-func servo_init() -> Int32
-
-@_silgen_name("servo_create_instance")
-func servo_create_instance(
+@_silgen_name("create_servo")
+func create_servo(
     nsview_ptr: UnsafeMutableRawPointer,
     width: UInt32,
     height: UInt32,
@@ -65,8 +62,8 @@ func servo_create_instance(
     options: UnsafePointer<ServoInitOptions>?
 ) -> ServoHandle
 
-@_silgen_name("servo_create_webview")
-func servo_create_webview(
+@_silgen_name("create_webview")
+func create_webview(
     servo_handle: ServoHandle,
     url: UnsafePointer<CChar>?,
     width: UInt32,
@@ -74,40 +71,40 @@ func servo_create_webview(
     scale_factor: Float
 ) -> WebViewHandle
 
-@_silgen_name("servo_webview_load_url")
-func servo_webview_load_url(
+@_silgen_name("webview_load_url")
+func webview_load_url(
     servo_handle: ServoHandle,
     webview_handle: WebViewHandle,
     url: UnsafePointer<CChar>
 ) -> Int32
 
-@_silgen_name("servo_webview_resize")
-func servo_webview_resize(
+@_silgen_name("webview_resize")
+func webview_resize(
     servo_handle: ServoHandle,
     webview_handle: WebViewHandle,
     width: UInt32,
     height: UInt32
 ) -> Int32
 
-@_silgen_name("servo_webview_paint")
-func servo_webview_paint(
+@_silgen_name("webview_paint")
+func webview_paint(
     servo_handle: ServoHandle,
     webview_handle: WebViewHandle
 ) -> Int32
 
-@_silgen_name("servo_spin_event_loop")
-func servo_spin_event_loop(servo_handle: ServoHandle) -> Int32
+@_silgen_name("spin_event_loop")
+func spin_event_loop(servo_handle: ServoHandle) -> Int32
 
-@_silgen_name("servo_destroy_webview")
-func servo_destroy_webview(
+@_silgen_name("destroy_webview")
+func destroy_webview(
     servo_handle: ServoHandle,
     webview_handle: WebViewHandle
 ) -> Int32
 
-@_silgen_name("servo_destroy_instance")
-func servo_destroy_instance(servo_handle: ServoHandle) -> Int32
+@_silgen_name("destroy_servo")
+func destroy_servo(servo_handle: ServoHandle) -> Int32
 
-@_silgen_name("servo_version")
+@_silgen_name("version")
 func servo_version() -> UnsafePointer<CChar>
 
 /// Event handling functions

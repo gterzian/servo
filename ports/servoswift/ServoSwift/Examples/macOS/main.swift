@@ -22,6 +22,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         loadInitialPage()
     }
     
+    @MainActor
     private func setupWindow() {
         window = NSWindow(
             contentRect: NSRect(x: 100, y: 100, width: 1024, height: 768),
@@ -30,7 +31,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             defer: false
         )
         
-        window.title = "ServoSwift Example - \(ServoController.shared.version)"
+        window.title = "ServoSwift Example"
         window.center()
         window.makeKeyAndOrderFront(nil)
         
@@ -42,6 +43,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.contentView?.addSubview(servoView)
     }
     
+    @MainActor
     private func loadInitialPage() {
         do {
             try servoView.load("https://demo.servo.org/experiments/twgl-tunnel/")
@@ -52,28 +54,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
-    func applicationShouldTerminateWhenLastWindowClosed(_ sender: NSApplication) -> Bool {
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return true
     }
 }
 
 // MARK: - ServoWebViewDelegate
 extension AppDelegate: ServoWebViewDelegate {
+    @MainActor
     func webView(_ webView: ServoWebView, didStartLoadingURL url: URL) {
         print("Started loading: \(url)")
         window.title = "Loading... - ServoSwift Example"
     }
     
+    @MainActor
     func webView(_ webView: ServoWebView, didFinishLoadingURL url: URL) {
         print("Finished loading: \(url)")
         window.title = "ServoSwift Example - \(url.host ?? url.absoluteString)"
     }
     
+    @MainActor
     func webView(_ webView: ServoWebView, didFailToLoadURL url: URL, error: Error) {
         print("Failed to load \(url): \(error)")
         window.title = "Load Failed - ServoSwift Example"
     }
     
+    @MainActor
     func webView(_ webView: ServoWebView, didUpdateTitle title: String) {
         print("Page title updated: \(title)")
         window.title = "\(title) - ServoSwift Example"

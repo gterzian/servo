@@ -13,6 +13,7 @@ import Foundation
 import AppKit
 
 /// Protocol for WebView delegate callbacks
+@MainActor
 public protocol ServoWebViewDelegate: AnyObject {
     func webView(_ webView: ServoWebView, didStartLoadingURL url: URL)
     func webView(_ webView: ServoWebView, didFinishLoadingURL url: URL)
@@ -21,7 +22,7 @@ public protocol ServoWebViewDelegate: AnyObject {
 }
 
 /// A WebView backed by Servo
-public class ServoWebView: NSObject {
+public class ServoWebView: NSObject, @unchecked Sendable {
     let handle: WebViewHandle
     private weak var servoInstance: ServoInstance?
     private weak var view: NSView?
@@ -45,13 +46,18 @@ public class ServoWebView: NSObject {
     }
     
     /// Load a URL in this WebView
+    @MainActor
     public func load(_ url: URL) throws {
         guard let servoInstance = servoInstance else {
             throw ServoError.invalidHandle
         }
         
         let result = url.absoluteString.withCString { cString in
-            servo_webview_load_url(servoInstance.handle, handle, cString)
+            webview_load_url(
+                servo_handle: servoInstance.handle,
+                webview_handle: handle,
+                url: cString
+            )
         }
         
         if result != ServoError.success.rawValue {
@@ -69,11 +75,11 @@ public class ServoWebView: NSObject {
             throw ServoError.invalidHandle
         }
         
-        let result = servo_webview_resize(
-            servoInstance.handle,
-            handle,
-            UInt32(size.width),
-            UInt32(size.height)
+        let result = webview_resize(
+            servo_handle: servoInstance.handle,
+            webview_handle: handle,
+            width: UInt32(size.width),
+            height: UInt32(size.height)
         )
         
         if result != ServoError.success.rawValue {
@@ -87,7 +93,10 @@ public class ServoWebView: NSObject {
             throw ServoError.invalidHandle
         }
         
-        let result = servo_webview_paint(servoInstance.handle, handle)
+        let result = webview_paint(
+            servo_handle: servoInstance.handle,
+            webview_handle: handle
+        )
         if result != ServoError.success.rawValue {
             throw ServoError(rawValue: result) ?? .unknownError
         }
@@ -102,12 +111,12 @@ public class ServoWebView: NSObject {
         guard let servoInstance = servoInstance else { return }
         
         servo_handle_mouse_event(
-            servoInstance.handle,
-            handle,
-            type.rawValue,
-            Float(point.x),
-            Float(point.y),
-            button
+            servo_handle: servoInstance.handle,
+            webview_handle: handle,
+            event_type: type.rawValue,
+            x: Float(point.x),
+            y: Float(point.y),
+            button: button
         )
     }
     
@@ -120,11 +129,11 @@ public class ServoWebView: NSObject {
         guard let servoInstance = servoInstance else { return }
         
         servo_handle_key_event(
-            servoInstance.handle,
-            handle,
-            type.rawValue,
-            keyCode,
-            modifiers
+            servo_handle: servoInstance.handle,
+            webview_handle: handle,
+            event_type: type.rawValue,
+            key_code: keyCode,
+            modifiers: modifiers
         )
     }
     
@@ -137,12 +146,12 @@ public class ServoWebView: NSObject {
         guard let servoInstance = servoInstance else { return }
         
         servo_handle_scroll_event(
-            servoInstance.handle,
-            handle,
-            deltaX,
-            deltaY,
-            Float(point.x),
-            Float(point.y)
+            servo_handle: servoInstance.handle,
+            webview_handle: handle,
+            delta_x: deltaX,
+            delta_y: deltaY,
+            x: Float(point.x),
+            y: Float(point.y)
         )
     }
     
@@ -150,7 +159,10 @@ public class ServoWebView: NSObject {
     internal func destroy() {
         guard let servoInstance = servoInstance else { return }
         
-        servo_destroy_webview(servoInstance.handle, handle)
+        _ = destroy_webview(
+            servo_handle: servoInstance.handle,
+            webview_handle: handle
+        )
         servoInstance.removeWebView(self)
     }
     

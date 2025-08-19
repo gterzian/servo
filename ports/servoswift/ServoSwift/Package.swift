@@ -1,4 +1,4 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 6.0
 // The Swift Package Manager package definition for ServoSwift
 
 import PackageDescription
@@ -19,9 +19,9 @@ let package = Package(
             name: "ServoSwift",
             dependencies: [],
             path: "Sources",
-            publicHeadersPath: "../../include",
+            publicHeadersPath: "ServoSwift/include",
             cSettings: [
-                .headerSearchPath("../../include"),
+                .headerSearchPath("ServoSwift/include"),
                 .define("SERVO_SWIFT_MACOS")
             ],
             linkerSettings: [
@@ -29,13 +29,20 @@ let package = Package(
                 .linkedFramework("AppKit"),
                 .linkedFramework("Metal"),
                 .linkedFramework("OpenGL"),
-                .linkedFramework("CoreGraphics")
+                .linkedFramework("CoreGraphics"),
+                .unsafeFlags([
+                    "-L/Users/Gregory/Projects/servo/target/debug",
+                    "-Xlinker", "-rpath", "-Xlinker", "/Users/Gregory/Projects/servo/target/debug"
+                ])
             ]
         ),
         .executableTarget(
             name: "ServoSwiftExample",
             dependencies: ["ServoSwift"],
-            path: "Examples/macOS"
+            path: "Examples/macOS",
+            swiftSettings: [
+                .swiftLanguageMode(.v6)
+            ]
         )
     ]
 )

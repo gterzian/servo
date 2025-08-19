@@ -12,35 +12,25 @@
 import Foundation
 import AppKit
 
-/// Main controller class for managing Servo instances
-public class ServoController {
+/// Main controller class for managing the single Servo instance
+public class ServoController: @unchecked Sendable {
     private var handle: ServoHandle = 0
     private var isInitialized = false
     
     /// Shared instance for global Servo management
+    @MainActor
     public static let shared = ServoController()
     
     private init() {}
     
-    /// Initialize the Servo library (call once at app startup)
-    public func initialize() throws {
-        guard !isInitialized else { return }
-        
-        let result = servo_init()
-        if result != ServoError.success.rawValue {
-            throw ServoError(rawValue: result) ?? .unknownError
-        }
-        
-        isInitialized = true
-    }
-    
-    /// Create a new Servo instance for the given NSView
-    public func createInstance(
+    /// Create the Servo instance for the given NSView (call once at app startup)
+    @MainActor
+    public func createServo(
         for view: NSView,
         options: ServoInitOptions = ServoInitOptions()
     ) throws -> ServoInstance {
-        guard isInitialized else {
-            throw ServoError.unknownError
+        guard !isInitialized else {
+            throw ServoError.unknownError // Already initialized
         }
         
         let viewPointer = Unmanaged.passUnretained(view).toOpaque()
@@ -48,17 +38,20 @@ public class ServoController {
         let scale = Float(view.window?.backingScaleFactor ?? 1.0)
         
         var opts = options
-        let handle = servo_create_instance(
-            viewPointer,
-            UInt32(frame.width),
-            UInt32(frame.height),
-            scale,
-            &opts
+        let handle = create_servo(
+            nsview_ptr: viewPointer,
+            width: UInt32(frame.width),
+            height: UInt32(frame.height),
+            scale_factor: scale,
+            options: &opts
         )
         
         if handle == 0 {
             throw ServoError.unknownError
         }
+        
+        self.handle = handle
+        self.isInitialized = true
         
         return ServoInstance(handle: handle, view: view)
     }
@@ -75,7 +68,7 @@ public class ServoController {
 }
 
 /// Represents a single Servo instance tied to an NSView
-public class ServoInstance {
+public class ServoInstance: @unchecked Sendable {
     let handle: ServoHandle
     private let view: NSView
     private var webviews: [WebViewHandle: ServoWebView] = [:]
@@ -86,25 +79,26 @@ public class ServoInstance {
     }
     
     /// Create a new WebView within this Servo instance
+    @MainActor
     public func createWebView(url: URL? = nil) throws -> ServoWebView {
         let frame = view.frame
         let scale = Float(view.window?.backingScaleFactor ?? 1.0)
         
         let urlString = url?.absoluteString
         let webviewHandle = urlString?.withCString { cString in
-            servo_create_webview(
-                handle,
-                cString,
-                UInt32(frame.width),
-                UInt32(frame.height),
-                scale
+            create_webview(
+                servo_handle: handle,
+                url: cString,
+                width: UInt32(frame.width),
+                height: UInt32(frame.height),
+                scale_factor: scale
             )
-        } ?? servo_create_webview(
-            handle,
-            nil,
-            UInt32(frame.width),
-            UInt32(frame.height),
-            scale
+        } ?? create_webview(
+            servo_handle: handle,
+            url: nil,
+            width: UInt32(frame.width),
+            height: UInt32(frame.height),
+            scale_factor: scale
         )
         
         if webviewHandle == 0 {
@@ -123,7 +117,7 @@ public class ServoInstance {
     
     /// Spin the Servo event loop (should be called regularly)
     public func spinEventLoop() throws {
-        let result = servo_spin_event_loop(handle)
+        let result = spin_event_loop(servo_handle: handle)
         if result != ServoError.success.rawValue {
             throw ServoError(rawValue: result) ?? .unknownError
         }
@@ -141,6 +135,6 @@ public class ServoInstance {
         }
         
         // Destroy the Servo instance
-        servo_destroy_instance(handle)
+        _ = destroy_servo(servo_handle: handle)
     }
 }

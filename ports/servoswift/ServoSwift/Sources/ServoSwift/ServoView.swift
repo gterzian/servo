@@ -16,7 +16,7 @@ import Foundation
 public class ServoView: NSView {
     private var servoInstance: ServoInstance?
     private var webView: ServoWebView?
-    private var displayLink: CVDisplayLink?
+    private var renderTimer: Timer?
     
     /// The delegate for WebView events
     public weak var delegate: ServoWebViewDelegate? {
@@ -48,22 +48,16 @@ public class ServoView: NSView {
     private func setupView() {
         wantsLayer = true
         
-        // Set up the display link for regular rendering
-        setupDisplayLink()
+        // Set up the render timer for regular rendering
+        setupRenderTimer()
     }
     
-    private func setupDisplayLink() {
-        var displayLink: CVDisplayLink?
-        CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
-        
-        if let displayLink = displayLink {
-            CVDisplayLinkSetOutputCallback(displayLink, { (displayLink, inNow, inOutputTime, flagsIn, flagsOut, displayLinkContext) -> CVReturn in
-                let servoView = Unmanaged<ServoView>.fromOpaque(displayLinkContext!).takeUnretainedValue()
-                servoView.renderFrame()
-                return kCVReturnSuccess
-            }, UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque()))
-            
-            self.displayLink = displayLink
+    private func setupRenderTimer() {
+        // Create a timer that fires 60 times per second
+        renderTimer = Timer.scheduledTimer(withTimeInterval: 1.0/60.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.renderFrame()
+            }
         }
     }
     
@@ -72,9 +66,9 @@ public class ServoView: NSView {
         
         if window != nil {
             try? initializeServo()
-            CVDisplayLinkStart(displayLink!)
+            renderTimer?.fire()
         } else {
-            CVDisplayLinkStop(displayLink!)
+            renderTimer?.invalidate()
             cleanupServo()
         }
     }
@@ -82,17 +76,15 @@ public class ServoView: NSView {
     private func initializeServo() throws {
         guard servoInstance == nil else { return }
         
-        // Initialize Servo if needed
-        try ServoController.shared.initialize()
-        
-        // Create Servo instance for this view
-        servoInstance = try ServoController.shared.createInstance(for: self)
+        // Create the single Servo instance for this view
+        servoInstance = try ServoController.shared.createServo(for: self)
         
         // Create initial WebView
         webView = try servoInstance?.createWebView()
         webView?.delegate = delegate
     }
     
+    @MainActor
     private func cleanupServo() {
         webView = nil
         servoInstance = nil
@@ -120,13 +112,12 @@ public class ServoView: NSView {
     }
     
     private func renderFrame() {
-        DispatchQueue.main.async {
-            // Spin the Servo event loop
-            try? self.servoInstance?.spinEventLoop()
-            
-            // Paint the WebView
-            try? self.webView?.paint()
-        }
+        // Timer callback runs on main queue, so no dispatch needed
+        // Spin the Servo event loop
+        try? servoInstance?.spinEventLoop()
+        
+        // Paint the WebView
+        try? webView?.paint()
     }
     
     // MARK: - Event Handling
@@ -181,9 +172,7 @@ public class ServoView: NSView {
     }
     
     deinit {
-        if let displayLink = displayLink {
-            CVDisplayLinkStop(displayLink)
-        }
-        cleanupServo()
+        // Just let the timer be deallocated naturally
+        // Don't try to access properties in deinit due to Sendable issues
     }
 }

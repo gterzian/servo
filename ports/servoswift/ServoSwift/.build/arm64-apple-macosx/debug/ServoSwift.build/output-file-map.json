@@ -1,0 +1,29 @@
+{
+  "": {
+    "swift-dependencies": "/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/master.swiftdeps"
+  },
+  "/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/Sources/ServoSwift/ServoBindings.swift": {
+    "dependencies": "/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/ServoBindings.d",
+    "object": "/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/ServoBindings.swift.o",
+    "swiftmodule": "/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/ServoBindings~partial.swiftmodule",
+    "swift-dependencies": "/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/ServoBindings.swiftdeps"
+  },
+  "/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/Sources/ServoSwift/ServoController.swift": {
+    "dependencies": "/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/ServoController.d",
+    "object": "/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/ServoController.swift.o",
+    "swiftmodule": "/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/ServoController~partial.swiftmodule",
+    "swift-dependencies": "/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/ServoController.swiftdeps"
+  },
+  "/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/Sources/ServoSwift/ServoView.swift": {
+    "dependencies": "/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/ServoView.d",
+    "object": "/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/ServoView.swift.o",
+    "swiftmodule": "/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/ServoView~partial.swiftmodule",
+    "swift-dependencies": "/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/ServoView.swiftdeps"
+  },
+  "/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/Sources/ServoSwift/ServoWebView.swift": {
+    "dependencies": "/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/ServoWebView.d",
+    "object": "/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/ServoWebView.swift.o",
+    "swiftmodule": "/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/ServoWebView~partial.swiftmodule",
+    "swift-dependencies": "/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/ServoWebView.swiftdeps"
+  }
+}

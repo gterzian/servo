@@ -1,0 +1,103 @@
+client:
+  name: basic
+  file-system: device-agnostic
+tools: {}
+targets:
+  "PackageStructure": ["<PackageStructure>"]
+  "ServoSwift-arm64-apple-macosx15.0-debug.module": ["<ServoSwift-arm64-apple-macosx15.0-debug.module>"]
+  "ServoSwiftExample-arm64-apple-macosx15.0-debug.exe": ["<ServoSwiftExample-arm64-apple-macosx15.0-debug.exe>"]
+  "ServoSwiftExample-arm64-apple-macosx15.0-debug.module": ["<ServoSwiftExample-arm64-apple-macosx15.0-debug.module>"]
+  "main": ["<ServoSwift-arm64-apple-macosx15.0-debug.module>","<ServoSwiftExample-arm64-apple-macosx15.0-debug.exe>","<ServoSwiftExample-arm64-apple-macosx15.0-debug.module>"]
+  "test": ["<ServoSwift-arm64-apple-macosx15.0-debug.module>","<ServoSwiftExample-arm64-apple-macosx15.0-debug.exe>","<ServoSwiftExample-arm64-apple-macosx15.0-debug.module>"]
+default: "main"
+nodes:
+  "/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/Examples/macOS/":
+    is-directory-structure: true
+    content-exclusion-patterns: [".git",".build"]
+  "/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/Sources/":
+    is-directory-structure: true
+    content-exclusion-patterns: [".git",".build"]
+  "/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwiftExample":
+    is-mutated: true
+commands:
+  "/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/sources":
+    tool: write-auxiliary-file
+    inputs: ["<sources-file-list>","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/Sources/ServoSwift/ServoBindings.swift","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/Sources/ServoSwift/ServoController.swift","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/Sources/ServoSwift/ServoView.swift","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/Sources/ServoSwift/ServoWebView.swift"]
+    outputs: ["/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/sources"]
+    description: "Write auxiliary file /Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/sources"
+
+  "/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwiftExample-entitlement.plist":
+    tool: write-auxiliary-file
+    inputs: ["<entitlement-plist>","<com.apple.security.get-task-allow>"]
+    outputs: ["/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwiftExample-entitlement.plist"]
+    description: "Write auxiliary file /Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwiftExample-entitlement.plist"
+
+  "/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwiftExample.build/sources":
+    tool: write-auxiliary-file
+    inputs: ["<sources-file-list>","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/Examples/macOS/main.swift"]
+    outputs: ["/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwiftExample.build/sources"]
+    description: "Write auxiliary file /Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwiftExample.build/sources"
+
+  "/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwiftExample.product/Objects.LinkFileList":
+    tool: write-auxiliary-file
+    inputs: ["<link-file-list>","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/ServoBindings.swift.o","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/ServoController.swift.o","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/ServoView.swift.o","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/ServoWebView.swift.o","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwiftExample.build/main.swift.o"]
+    outputs: ["/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwiftExample.product/Objects.LinkFileList"]
+    description: "Write auxiliary file /Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwiftExample.product/Objects.LinkFileList"
+
+  "/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt":
+    tool: write-auxiliary-file
+    inputs: ["<swift-get-version>","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"]
+    outputs: ["/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"]
+    always-out-of-date: "true"
+    description: "Write auxiliary file /Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+
+  "<ServoSwift-arm64-apple-macosx15.0-debug.module>":
+    tool: phony
+    inputs: ["/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/ServoBindings.swift.o","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/ServoController.swift.o","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/ServoView.swift.o","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/ServoWebView.swift.o","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/Modules/ServoSwift.swiftmodule"]
+    outputs: ["<ServoSwift-arm64-apple-macosx15.0-debug.module>"]
+
+  "<ServoSwiftExample-arm64-apple-macosx15.0-debug.exe>":
+    tool: phony
+    inputs: ["<ServoSwiftExample-arm64-apple-macosx15.0-debug.exe-CodeSigning>"]
+    outputs: ["<ServoSwiftExample-arm64-apple-macosx15.0-debug.exe>"]
+
+  "<ServoSwiftExample-arm64-apple-macosx15.0-debug.module>":
+    tool: phony
+    inputs: ["/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwiftExample.build/main.swift.o","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/Modules/ServoSwiftExample.swiftmodule"]
+    outputs: ["<ServoSwiftExample-arm64-apple-macosx15.0-debug.module>"]
+
+  "C.ServoSwift-arm64-apple-macosx15.0-debug.module":
+    tool: shell
+    inputs: ["/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/Sources/ServoSwift/ServoBindings.swift","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/Sources/ServoSwift/ServoController.swift","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/Sources/ServoSwift/ServoView.swift","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/Sources/ServoSwift/ServoWebView.swift","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/sources"]
+    outputs: ["/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/ServoBindings.swift.o","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/ServoController.swift.o","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/ServoView.swift.o","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/ServoWebView.swift.o","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/Modules/ServoSwift.swiftmodule"]
+    description: "Compiling Swift Module 'ServoSwift' (4 sources)"
+    args: ["/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc","-module-name","ServoSwift","-emit-dependencies","-emit-module","-emit-module-path","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/Modules/ServoSwift.swiftmodule","-output-file-map","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/output-file-map.json","-parse-as-library","-incremental","-c","@/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/sources","-I","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/Modules","-target","arm64-apple-macosx11.0","-enable-batch-mode","-index-store-path","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/index/store","-Onone","-enable-testing","-j8","-DSWIFT_PACKAGE","-DDEBUG","-module-cache-path","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ModuleCache","-parseable-output","-parse-as-library","-emit-objc-header","-emit-objc-header-path","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/ServoSwift-Swift.h","-color-diagnostics","-swift-version","6","-Xcc","-DSERVO_SWIFT_MACOS","-Xcc","-I/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/Sources/ServoSwift/include","-sdk","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.5.sdk","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-I","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-L","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-g","-Xcc","-isysroot","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.5.sdk","-Xcc","-F","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-Xcc","-F","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-Xcc","-fPIC","-Xcc","-g","-package-name","servoswift"]
+
+  "C.ServoSwiftExample-arm64-apple-macosx15.0-debug.exe":
+    tool: shell
+    inputs: ["/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/ServoBindings.swift.o","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/ServoController.swift.o","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/ServoView.swift.o","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/ServoWebView.swift.o","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwiftExample.build/main.swift.o","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwiftExample.product/Objects.LinkFileList"]
+    outputs: ["/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwiftExample"]
+    description: "Linking ./.build/arm64-apple-macosx/debug/ServoSwiftExample"
+    args: ["/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc","-L","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug","-o","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwiftExample","-module-name","ServoSwiftExample","-Xlinker","-no_warn_duplicate_libraries","-emit-executable","-Xlinker","-alias","-Xlinker","_ServoSwiftExample_main","-Xlinker","_main","-Xlinker","-rpath","-Xlinker","@loader_path","@/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwiftExample.product/Objects.LinkFileList","-Xlinker","-rpath","-Xlinker","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.5/macosx","-target","arm64-apple-macosx11.0","-lservoswift","-framework","AppKit","-framework","Metal","-framework","OpenGL","-framework","CoreGraphics","-L/Users/Gregory/Projects/servo/target/debug","-Xlinker","-rpath","-Xlinker","/Users/Gregory/Projects/servo/target/debug","-Xlinker","-add_ast_path","-Xlinker","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/Modules/ServoSwift.swiftmodule","-Xlinker","-add_ast_path","-Xlinker","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/Modules/ServoSwiftExample.swiftmodule","-sdk","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.5.sdk","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-I","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-L","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-g"]
+
+  "C.ServoSwiftExample-arm64-apple-macosx15.0-debug.exe-entitlements":
+    tool: shell
+    inputs: ["/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwiftExample","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwiftExample-entitlement.plist"]
+    outputs: ["<ServoSwiftExample-arm64-apple-macosx15.0-debug.exe-CodeSigning>"]
+    description: "Applying debug entitlements to ./.build/arm64-apple-macosx/debug/ServoSwiftExample"
+    args: ["codesign","--force","--sign","-","--entitlements","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwiftExample-entitlement.plist","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwiftExample"]
+
+  "C.ServoSwiftExample-arm64-apple-macosx15.0-debug.module":
+    tool: shell
+    inputs: ["/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/Examples/macOS/main.swift","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/Modules/ServoSwift.swiftmodule","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwiftExample.build/sources"]
+    outputs: ["/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwiftExample.build/main.swift.o","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/Modules/ServoSwiftExample.swiftmodule"]
+    description: "Compiling Swift Module 'ServoSwiftExample' (1 sources)"
+    args: ["/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc","-module-name","ServoSwiftExample","-emit-dependencies","-emit-module","-emit-module-path","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/Modules/ServoSwiftExample.swiftmodule","-output-file-map","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwiftExample.build/output-file-map.json","-incremental","-c","@/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwiftExample.build/sources","-I","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/Modules","-target","arm64-apple-macosx11.0","-enable-batch-mode","-index-store-path","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/index/store","-Onone","-enable-testing","-j8","-DSWIFT_PACKAGE","-DDEBUG","-module-cache-path","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ModuleCache","-parseable-output","-Xfrontend","-entry-point-function-name","-Xfrontend","ServoSwiftExample_main","-color-diagnostics","-swift-version","6","-sdk","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.5.sdk","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-I","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-L","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-g","-Xcc","-isysroot","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.5.sdk","-Xcc","-F","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-Xcc","-F","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-Xcc","-fPIC","-Xcc","-g","-package-name","servoswift"]
+
+  "PackageStructure":
+    tool: package-structure-tool
+    inputs: ["/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/Examples/macOS/","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/Sources/","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/Package.swift","/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/Package.resolved"]
+    outputs: ["<PackageStructure>"]
+    description: "Planning build"
+    allow-missing-inputs: true
+
