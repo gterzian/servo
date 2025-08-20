@@ -1,4 +1,0 @@
-module ServoSwift {
-    header "/Users/Gregory/Projects/servo/ports/servoswift/ServoSwift/.build/arm64-apple-macosx/debug/ServoSwift.build/ServoSwift-Swift.h"
-    requires objc
-}

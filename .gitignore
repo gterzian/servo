@@ -74,3 +74,10 @@ support/macos/Brewfile.lock.json
 
 # Justfiles
 justfile
+
+# ServoSwift port
+/ports/servoswift/target/
+/ports/servoswift/ServoSwift/.build/
+/ports/servoswift/ServoSwift/.swiftpm/
+/ports/servoswift/ServoSwift/Package.resolved
+/ports/servoswift/include/ServoSwift.h
