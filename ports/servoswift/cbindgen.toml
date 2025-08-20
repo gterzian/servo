@@ -10,5 +10,4 @@ include = ["ServoError", "ServoInitOptions", "ServoHandle", "WebViewHandle"]
 [parse]
 parse_deps = false
 clean = false
-include = ["cbindgen_exports"]
-exclude = ["swift_bindings"]
+include = ["swift_bindings"]

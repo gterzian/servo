@@ -175,7 +175,9 @@ pub extern "C" fn create_webview(
     webview.move_resize(rect);
 
     // Navigate to the URL
-    webview.load(parsed_url.into_url());    let webview_instance = WebViewInstance { webview };
+    webview.load(parsed_url.into_url());
+    
+    let webview_instance = WebViewInstance { webview };
     let webview_ptr = Box::into_raw(Box::new(webview_instance)) as *mut c_void;
 
     debug!("Created WebView at {:p} for URL: {}", webview_ptr, url_str);
