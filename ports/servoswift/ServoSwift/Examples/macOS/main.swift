@@ -9,79 +9,70 @@
 //  Example macOS app demonstrating ServoSwift usage
 //
 
-import AppKit
+import SwiftUI
 import ServoSwift
+import AppKit
+import Dispatch
 
-// AppDelegate for the example app
-class AppDelegate: NSObject, NSApplicationDelegate {
-    var window: NSWindow!
-    var servoView: ServoView!
-    
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        setupWindow()
-        loadInitialPage()
+// Use a DispatchSource-based SIGINT handler. This is signal-safe and
+// integrates with GCD; it will call NSApplication.shared.terminate(nil)
+// on the main queue when Ctrl-C is received in the terminal.
+func installSigintHandler() {
+    let sigintSource = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
+    sigintSource.setEventHandler {
+    print("SIGINT received: terminating app")
+    NSApplication.shared.terminate(nil)
     }
-    
-    private func setupWindow() {
-        window = NSWindow(
-            contentRect: NSRect(x: 100, y: 100, width: 1024, height: 768),
-            styleMask: [.titled, .closable, .resizable, .miniaturizable],
-            backing: .buffered,
-            defer: false
-        )
-        
-        window.title = "ServoSwift Example - \(ServoController.shared.version)"
-        window.center()
-        window.makeKeyAndOrderFront(nil)
-        
-        // Create and configure ServoView
-        servoView = ServoView(frame: window.contentView!.bounds)
-        servoView.autoresizingMask = [.width, .height]
-        servoView.delegate = self
-        
-        window.contentView?.addSubview(servoView)
+    // Must call signal() to ensure the signal is not ignored by the system
+    sigintSource.resume()
+}
+
+// Main SwiftUI app
+@main
+struct ServoSwiftExampleApp: App {
+    init() {
+        installSigintHandler()
     }
-    
-    private func loadInitialPage() {
-        do {
-            try servoView.load("https://demo.servo.org/experiments/twgl-tunnel/")
-        } catch {
-            print("Failed to load initial page: \(error)")
-            // Fallback to a simple local page
-            try? servoView.load("about:blank")
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
         }
     }
-    
-    func applicationShouldTerminateWhenLastWindowClosed(_ sender: NSApplication) -> Bool {
-        return true
-    }
 }
 
-// MARK: - ServoWebViewDelegate
-extension AppDelegate: ServoWebViewDelegate {
-    func webView(_ webView: ServoWebView, didStartLoadingURL url: URL) {
-        print("Started loading: \(url)")
-        window.title = "Loading... - ServoSwift Example"
-    }
+struct ContentView: View {
+    @State private var url = URL(string: "https://servo.org")!
+    @State private var isLoading = false
     
-    func webView(_ webView: ServoWebView, didFinishLoadingURL url: URL) {
-        print("Finished loading: \(url)")
-        window.title = "ServoSwift Example - \(url.host ?? url.absoluteString)"
-    }
-    
-    func webView(_ webView: ServoWebView, didFailToLoadURL url: URL, error: Error) {
-        print("Failed to load \(url): \(error)")
-        window.title = "Load Failed - ServoSwift Example"
-    }
-    
-    func webView(_ webView: ServoWebView, didUpdateTitle title: String) {
-        print("Page title updated: \(title)")
-        window.title = "\(title) - ServoSwift Example"
+    var body: some View {
+        VStack {
+            HStack {
+                TextField("URL", text: Binding(
+                    get: { url.absoluteString },
+                    set: { if let newURL = URL(string: $0) { url = newURL } }
+                ))
+                .textFieldStyle(RoundedBorderTextFieldStyle())
+                
+                Button("Go") {
+                    // URL will update automatically via the binding
+                }
+                .disabled(isLoading)
+            }
+            .padding()
+            
+            ServoSwiftUIView(
+                url: url,
+                onLoadStart: { url in
+                    print("Started loading: \(url)")
+                    isLoading = true
+                },
+                onLoadFinish: { url in
+                    print("Finished loading: \(url)")
+                    isLoading = false
+                }
+            )
+            .frame(minWidth: 800, minHeight: 600)
+        }
+        .navigationTitle("ServoSwift Example - \(url)")
     }
 }
-
-// Entry point
-let app = NSApplication.shared
-let delegate = AppDelegate()
-app.delegate = delegate
-app.run()

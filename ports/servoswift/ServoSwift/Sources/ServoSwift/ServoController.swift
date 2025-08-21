@@ -23,10 +23,15 @@ public class ServoController {
     
     /// Initialize the Servo library (call once at app startup)
     public func initialize() throws {
-        guard !isInitialized else { return }
+        print("🚀 ServoController: initialize() called")
+        guard !isInitialized else { 
+            print("ℹ️ ServoController: Already initialized, skipping")
+            return 
+        }
         
         // No initialization function needed in our current API
         isInitialized = true
+        print("✅ ServoController: Initialization completed")
     }
     
     /// Create a new Servo instance for the given NSView
@@ -34,27 +39,36 @@ public class ServoController {
         for view: NSView,
         options: ServoInitOptions = ServoInitOptions()
     ) throws -> ServoInstance {
+        print("🏗️ ServoController: createInstance() called for view: \(view)")
         guard isInitialized else {
+            print("❌ ServoController: Not initialized, cannot create instance")
             throw ServoError.unknownError
         }
         
         let viewPointer = Unmanaged.passUnretained(view).toOpaque()
         let frame = view.frame
         let scale = Float(view.window?.backingScaleFactor ?? 1.0)
-        
+
+        // Convert to physical pixels for Servo: width_in_pixels = points * backingScaleFactor
+        let pixelWidth = UInt32(frame.width * CGFloat(scale))
+        let pixelHeight = UInt32(frame.height * CGFloat(scale))
+        print("📊 ServoController: Creating servo with - frame: \(frame), scale: \(scale), pixels: (\(pixelWidth), \(pixelHeight))")
+
         var opts = options
         let handle = create_servo(
             viewPointer,
-            UInt32(frame.width),
-            UInt32(frame.height),
+            pixelWidth,
+            pixelHeight,
             scale,
             &opts
         )
         
         if handle == nil {
+            print("❌ ServoController: create_servo returned null handle")
             throw ServoError.unknownError
         }
 
+        print("✅ ServoController: Servo instance created with handle: \(handle!)")
         return ServoInstance(handle: handle!, view: view)
     }
     
@@ -76,35 +90,49 @@ public class ServoInstance {
     private var webviews: [UnsafeMutableRawPointer: ServoWebView] = [:]
     
     internal init(handle: UnsafeMutableRawPointer, view: NSView) {
+        print("🏛️ ServoInstance: init() called with handle: \(handle)")
         self.handle = handle
         self.view = view
     }
     
     /// Create a new WebView within this Servo instance
     public func createWebView(url: URL? = nil) throws -> ServoWebView {
-        let frame = view.frame
-        let scale = Float(view.window?.backingScaleFactor ?? 1.0)
+        print("🕸️ ServoInstance: createWebView() called with URL: \(url?.absoluteString ?? "nil")")
+    let frame = view.frame
+    let scale = Float(view.window?.backingScaleFactor ?? 1.0)
+
+    // Send pixel dimensions to Servo (points * scale)
+    let pixelWidth = UInt32(frame.width * CGFloat(scale))
+    let pixelHeight = UInt32(frame.height * CGFloat(scale))
+    print("📊 ServoInstance: Creating webview with - frame: \(frame), scale: \(scale), pixels: (\(pixelWidth), \(pixelHeight))")
         
         let urlString = url?.absoluteString
+        let viewPointer = Unmanaged.passUnretained(view).toOpaque()
         let webviewHandle = urlString?.withCString { cString in
-            create_webview(
+            print("🔗 ServoInstance: Calling create_webview with C string: \(String(cString: cString))")
+            return create_webview(
                 handle,
                 cString,
-                UInt32(frame.width),
-                UInt32(frame.height),
-                scale
+                pixelWidth,
+                pixelHeight,
+                scale,
+                viewPointer
             )
         } ?? create_webview(
             handle,
             nil,
-            UInt32(frame.width),
-            UInt32(frame.height),
-            scale
+            pixelWidth,
+            pixelHeight,
+            scale,
+            viewPointer
         )
         
         if webviewHandle == nil {
+            print("❌ ServoInstance: create_webview returned null handle")
             throw ServoError.unknownError
         }
+        
+        print("✅ ServoInstance: WebView created with handle: \(webviewHandle!)")
         
         let webview = ServoWebView(
             handle: webviewHandle!,
@@ -113,6 +141,7 @@ public class ServoInstance {
         )
         
         webviews[webviewHandle!] = webview
+        print("📋 ServoInstance: WebView registered, total webviews: \(webviews.count)")
         return webview
     }
     

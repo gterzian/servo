@@ -51,7 +51,7 @@ public class ServoWebView: NSObject {
         }
         
         let result = url.absoluteString.withCString { cString in
-            webview_load_url(servoInstance.handle, handle, cString)
+            return webview_load_url(servoInstance.handle, handle, cString)
         }
         
         if result != ServoError.success {
@@ -68,12 +68,16 @@ public class ServoWebView: NSObject {
         guard let servoInstance = servoInstance else {
             throw ServoError.invalidHandle
         }
-        
+        // Convert to physical pixels using the view/window backing scale
+        let scale = Float(view?.window?.backingScaleFactor ?? 1.0)
+        let pixelWidth = UInt32(size.width * CGFloat(scale))
+        let pixelHeight = UInt32(size.height * CGFloat(scale))
+
         let result = webview_resize(
             servoInstance.handle,
             handle,
-            UInt32(size.width),
-            UInt32(size.height)
+            pixelWidth,
+            pixelHeight
         )
         
         if result != ServoError.success {
@@ -83,14 +87,20 @@ public class ServoWebView: NSObject {
     
     /// Paint the WebView to its rendering context
     public func paint() throws {
+        print("🎨 Swift ServoWebView.paint() called")
         guard let servoInstance = servoInstance else {
+            print("❌ Swift ServoWebView.paint() - no servoInstance")
             throw ServoError.invalidHandle
         }
         
+        print("🔧 Swift ServoWebView.paint() - calling webview_paint with handles: servo=\(servoInstance.handle), webview=\(handle)")
         let result = webview_paint(servoInstance.handle, handle)
-        if result != ServoError.success {
-            throw result
+        print("📊 Swift ServoWebView.paint() - webview_paint returned: \(result ? "success" : "failure")")
+        if !result {
+            print("❌ Swift ServoWebView.paint() - error: paint failed")
+            throw ServoError.renderingError
         }
+        print("✅ Swift ServoWebView.paint() - completed successfully")
     }
     
     /// Handle mouse events

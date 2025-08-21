@@ -120,12 +120,27 @@ public class ServoView: NSView {
     }
     
     private func renderFrame() {
+        print("DEBUG: renderFrame() called")
         DispatchQueue.main.async {
-            // Spin the Servo event loop
-            try? self.servoInstance?.spinEventLoop()
+            guard let servoInstance = self.servoInstance else {
+                print("DEBUG: No servo instance")
+                return
+            }
             
-            // Paint the WebView
-            try? self.webView?.paint()
+            // Check if Servo needs repaint (this also spins the event loop)
+            if servo_needs_repaint(servoInstance.handle) {
+                print("DEBUG: Servo needs repaint, painting...")
+                
+                // Paint the WebView
+                do {
+                    try self.webView?.paint()
+                    print("DEBUG: webView.paint() succeeded")
+                } catch {
+                    print("DEBUG: webView.paint() error: \(error)")
+                }
+            } else {
+                print("DEBUG: Servo doesn't need repaint")
+            }
         }
     }
     

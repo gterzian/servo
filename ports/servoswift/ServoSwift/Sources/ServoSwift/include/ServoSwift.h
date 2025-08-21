@@ -41,6 +41,16 @@ void* create_webview(
     uint32_t height,
     float scale_factor
 );
+/// Create a WebView within the Servo instance and return an opaque pointer to it
+/// delegate_ptr is an opaque pointer passed back to the delegate for notify callbacks
+void* create_webview(
+    void *servo_ptr,
+    const char *url,
+    uint32_t width,
+    uint32_t height,
+    float scale_factor,
+    void *delegate_ptr
+);
 
 /// Load a URL in an existing WebView
 ServoError webview_load_url(
@@ -58,13 +68,19 @@ ServoError webview_resize(
 );
 
 /// Paint a WebView to its surface
-ServoError webview_paint(
+bool webview_paint(
     void *servo_ptr,
     void *webview_ptr
 );
 
+/// Present rendered content to screen (call from draw(_:))
+bool webview_present(void *servo_ptr);
+
 /// Spin the event loop for the Servo instance
 ServoError spin_event_loop(void *servo_ptr);
+
+/// Check if Servo needs repainting
+bool servo_needs_repaint(void *servo_ptr);
 
 /// Destroy a WebView (Swift should call this in WebView deinit)
 ServoError destroy_webview(

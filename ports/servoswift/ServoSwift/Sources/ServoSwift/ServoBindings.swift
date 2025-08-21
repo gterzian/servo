@@ -68,7 +68,8 @@ func create_webview(
     _ url: UnsafePointer<CChar>?,
     _ width: UInt32,
     _ height: UInt32,
-    _ scale_factor: Float
+    _ scale_factor: Float,
+    _ delegate_ptr: UnsafeMutableRawPointer?
 ) -> UnsafeMutableRawPointer?
 
 @_silgen_name("webview_load_url")
@@ -90,7 +91,28 @@ func webview_resize(
 func webview_paint(
     _ servo_ptr: UnsafeMutableRawPointer,
     _ webview_ptr: UnsafeMutableRawPointer
-) -> ServoError
+) -> Bool
+
+@_silgen_name("webview_present")
+func webview_present(_ servo_ptr: UnsafeMutableRawPointer) -> Bool
+
+@_silgen_name("servo_resize_context")
+func servo_resize_context(_ servo_ptr: UnsafeMutableRawPointer, _ width: UInt32, _ height: UInt32) -> ServoError
+
+@_silgen_name("servo_save_screenshot")
+func servo_save_screenshot(_ servo_ptr: UnsafeMutableRawPointer, _ path: UnsafePointer<CChar>) -> ServoError
+
+@_silgen_name("webview_capture_webrender")
+func webview_capture_webrender(_ servo_ptr: UnsafeMutableRawPointer, _ webview_ptr: UnsafeMutableRawPointer) -> ServoError
+
+@_silgen_name("servo_parent_prepare_for_rendering")
+func servo_parent_prepare_for_rendering(_ servo_ptr: UnsafeMutableRawPointer) -> ServoError
+
+@_silgen_name("servo_parent_present")
+func servo_parent_present(_ servo_ptr: UnsafeMutableRawPointer) -> ServoError
+
+@_silgen_name("servo_render_offscreen_to_parent")
+func servo_render_offscreen_to_parent(_ servo_ptr: UnsafeMutableRawPointer) -> ServoError
 
 @_silgen_name("spin_event_loop")
 func spin_event_loop(_ servo_ptr: UnsafeMutableRawPointer) -> ServoError
@@ -106,6 +128,12 @@ func destroy_servo(_ servo_ptr: UnsafeMutableRawPointer) -> ServoError
 
 @_silgen_name("version")
 func version() -> UnsafePointer<CChar>
+
+@_silgen_name("servo_needs_repaint")
+func servo_needs_repaint(_ servo_ptr: UnsafeMutableRawPointer) -> Bool
+
+@_silgen_name("servo_fill_offscreen_solid_color")
+func servo_fill_offscreen_solid_color(_ servo_ptr: UnsafeMutableRawPointer, _ r: UInt8, _ g: UInt8, _ b: UInt8, _ a: UInt8) -> ServoError
 
 /// Event handling functions (not implemented yet)
 /// These would need to be added to the Rust bindings

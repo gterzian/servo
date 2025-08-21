@@ -13,9 +13,6 @@ path = "lib.rs"
 crate-type = ["cdylib", "staticlib"]
 bench = false
 
-[build-dependencies]
-cbindgen = "0.24"
-
 [dependencies]
 cfg-if = { workspace = true }
 compositing_traits = { workspace = true }
@@ -32,6 +29,7 @@ servo_url = { path = "../../components/url" }
 url = { workspace = true }
 webrender_api = { workspace = true }
 env_logger = { workspace = true }
+gleam = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3.1", default-features = false, features = [

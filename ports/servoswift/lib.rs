@@ -9,12 +9,10 @@
 //! and provides the necessary bridge between Swift/Objective-C and Servo's Rust API.
 
 mod swift_bindings;
-mod servo_view;
 mod rendering_context;
-mod event_handling;
+mod resources;
 
 pub use swift_bindings::*;
-pub use servo_view::*;
 
 use std::sync::Once;
 
