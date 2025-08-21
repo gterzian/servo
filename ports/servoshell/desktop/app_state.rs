@@ -245,11 +245,6 @@ impl RunningAppState {
         }
     }
 
-    /// Request a repaint (e.g., for animations)
-    pub(crate) fn request_repaint(&self) {
-        self.inner_mut().need_repaint = true;
-    }
-
     /// Spins the internal application event loop.
     ///
     /// - Notifies Servo about incoming gamepad events

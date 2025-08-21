@@ -349,8 +349,14 @@ impl App {
                     }
                 },
                 MinibrowserEvent::RequestAnimation => {
-                    // Request repaint for animation (e.g., spinner)
-                    state.request_repaint();
+                    let window = self
+                        .windows
+                        .values()
+                        .next()
+                        .expect("Should have at least one window in servoshell");
+                    // Request redraw for native ui animation (e.g., spinner)
+                    // Note: of itself this does not trigger a paint of web content.
+                    window.winit_window().unwrap().request_redraw();
                 },
                 MinibrowserEvent::ClearUrlPredictions => {
                     // Clear URL predictions from app state
