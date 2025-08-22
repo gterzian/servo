@@ -265,7 +265,9 @@ impl RunningAppState {
 
         // Delegate handlers may have asked us to present or update compositor contents.
         // Currently, egui-file-dialog dialogs need to be constantly redrawn or animations aren't fluid.
-        let need_window_redraw = self.inner().need_repaint || self.has_active_dialog();
+        let need_window_redraw = self.inner().need_repaint ||
+            self.has_active_dialog() ||
+            self.has_pending_url_predictions();
         let need_update = std::mem::replace(&mut self.inner_mut().need_update, false);
 
         PumpResult::Continue {

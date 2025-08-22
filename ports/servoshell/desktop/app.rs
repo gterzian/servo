@@ -348,16 +348,6 @@ impl App {
                         state.send_url_input(focused_webview.id(), text);
                     }
                 },
-                MinibrowserEvent::RequestAnimation => {
-                    let window = self
-                        .windows
-                        .values()
-                        .next()
-                        .expect("Should have at least one window in servoshell");
-                    // Request redraw for native ui animation (e.g., spinner)
-                    // Note: of itself this does not trigger a paint of web content.
-                    window.winit_window().unwrap().request_redraw();
-                },
                 MinibrowserEvent::ClearUrlPredictions => {
                     // Clear URL predictions from app state
                     state.clear_url_predictions_for_focused_webview();

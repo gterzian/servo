@@ -72,9 +72,6 @@ pub enum MinibrowserEvent {
     LLMInput(String),
     /// Address bar text changed.
     AddressBarInput(String),
-    /// User clicked on a predicted URL.
-    /// Request animation/repaint (e.g., for spinner).
-    RequestAnimation,
     /// Clear URL predictions.
     ClearUrlPredictions,
 }
@@ -451,10 +448,6 @@ impl Minibrowser {
                                     ui.spinner();
                                     ui.label("Predicting URLs...");
                                 });
-                                // Request animation for the spinner
-                                event_queue
-                                    .borrow_mut()
-                                    .push(MinibrowserEvent::RequestAnimation);
                             } else if let Some(predicted_urls_vec) = predictions.as_ref() {
                                 for predicted_url in predicted_urls_vec.iter() {
                                     if ui.button(predicted_url).clicked() {
