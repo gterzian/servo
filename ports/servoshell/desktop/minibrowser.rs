@@ -438,16 +438,26 @@ impl Minibrowser {
 
             // URL predictions dropdown below address bar
             let has_pending = state.has_pending_url_predictions();
-            let predictions = predicted_urls.borrow().clone();
-            let prediction_input_text = prediction_input.borrow().clone();
-            let current_location_text = location.borrow().clone();
+
+            // Borrow contents without cloning; we will only clone the single
+            // selected URL if the user clicks it. Keeping the borrow scoped to
+            // the rendering avoids allocations while preventing borrow conflicts
+            // when we mutate after rendering.
+            let predictions_ref = predicted_urls.borrow();
+            let prediction_input_ref = prediction_input.borrow();
+            let current_location_ref = location.borrow();
 
             // Only show predictions if they match the current input or if we have pending predictions
             let should_show_predictions = has_pending ||
-                (predictions.is_some() &&
-                    !predictions.as_ref().unwrap().is_empty() &&
-                    prediction_input_text.as_ref() == Some(&current_location_text) ||
-                    current_location_text == "servo:newtab".to_string());
+                (predictions_ref.is_some() &&
+                    !predictions_ref.as_ref().unwrap().is_empty() &&
+                    prediction_input_ref.as_ref().map(|s| s.as_str()) ==
+                        Some(current_location_ref.as_str()) ||
+                    current_location_ref.as_str() == "servo:newtab");
+
+            // Track the selected URL (clone only the chosen string) so we can mutate
+            // the RefCells after dropping the immutable borrows.
+            let mut selected_prediction: Option<String> = None;
 
             if should_show_predictions {
                 TopBottomPanel::top("url_predictions")
@@ -465,30 +475,41 @@ impl Minibrowser {
                                     ui.spinner();
                                     ui.label("Predicting URLs...");
                                 });
-                            } else if let Some(predicted_urls_vec) = predictions.as_ref() {
+                            } else if let Some(predicted_urls_vec) = predictions_ref.as_ref() {
                                 for predicted_url in predicted_urls_vec.iter() {
                                     if ui.button(predicted_url).clicked() {
-                                        // Immediately update the address bar to show the selected URL
-                                        *location.borrow_mut() = predicted_url.clone();
-                                        location_dirty.set(false);
-
-                                        // Clear predictions to hide the dropdown immediately
-                                        *predicted_urls.borrow_mut() = None;
-                                        *prediction_input.borrow_mut() = None;
-
-                                        // Clear predictions from app state too
-                                        event_queue
-                                            .borrow_mut()
-                                            .push(MinibrowserEvent::ClearUrlPredictions);
-
-                                        event_queue
-                                            .borrow_mut()
-                                            .push(MinibrowserEvent::Go(predicted_url.clone()));
+                                        // Clone only the clicked URL (single allocation on selection)
+                                        selected_prediction = Some(predicted_url.clone());
                                     }
                                 }
                             }
                         });
                     });
+            }
+
+            // Drop the immutable borrows before performing any mutations
+            drop(predictions_ref);
+            drop(prediction_input_ref);
+            drop(current_location_ref);
+
+            // If the user selected a prediction, apply it and clear prediction state
+            if let Some(predicted_url) = selected_prediction {
+                // Immediately update the address bar to show the selected URL
+                *location.borrow_mut() = predicted_url.clone();
+                location_dirty.set(false);
+
+                // Clear predictions to hide the dropdown immediately
+                *predicted_urls.borrow_mut() = None;
+                *prediction_input.borrow_mut() = None;
+
+                // Clear predictions from app state too and navigate
+                event_queue
+                    .borrow_mut()
+                    .push(MinibrowserEvent::ClearUrlPredictions);
+
+                event_queue
+                    .borrow_mut()
+                    .push(MinibrowserEvent::Go(predicted_url.clone()));
             }
 
             // Add the new bottom panel with simple text input
