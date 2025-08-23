@@ -451,9 +451,9 @@ impl Minibrowser {
             let should_show_predictions = has_pending ||
                 (predictions_ref.is_some() &&
                     !predictions_ref.as_ref().unwrap().is_empty() &&
-                    prediction_input_ref.as_ref().map(|s| s.as_str()) ==
+                    (prediction_input_ref.as_ref().map(|s| s.as_str()) ==
                         Some(current_location_ref.as_str()) ||
-                    current_location_ref.as_str() == "servo:newtab");
+                        current_location_ref.as_str() == "servo:newtab"));
 
             // Track the selected URL (clone only the chosen string) so we can mutate
             // the RefCells after dropping the immutable borrows.
