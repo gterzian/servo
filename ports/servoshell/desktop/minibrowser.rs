@@ -316,6 +316,22 @@ impl Minibrowser {
         } = self;
 
         let _duration = context.run(winit_window, |ctx| {
+            // A simple Tab header strip
+            TopBottomPanel::top("tabs").show(ctx, |ui| {
+                ui.allocate_ui_with_layout(
+                    ui.available_size(),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        for (_, webview) in state.webviews().into_iter() {
+                            Self::browser_tab(ui, webview, &mut event_queue.borrow_mut());
+                        }
+                        if ui.add(Minibrowser::toolbar_button("+")).clicked() {
+                            event_queue.borrow_mut().push(MinibrowserEvent::NewWebView);
+                        }
+                    },
+                );
+            });
+
             // TODO: While in fullscreen add some way to mitigate the increased phishing risk
             // when not displaying the URL bar: https://github.com/servo/servo/issues/32443
             if winit_window.fullscreen().is_none() {
@@ -474,22 +490,6 @@ impl Minibrowser {
                     });
             }
 
-            // A simple Tab header strip
-            TopBottomPanel::top("tabs").show(ctx, |ui| {
-                ui.allocate_ui_with_layout(
-                    ui.available_size(),
-                    egui::Layout::left_to_right(egui::Align::Center),
-                    |ui| {
-                        for (_, webview) in state.webviews().into_iter() {
-                            Self::browser_tab(ui, webview, &mut event_queue.borrow_mut());
-                        }
-                        if ui.add(Minibrowser::toolbar_button("+")).clicked() {
-                            event_queue.borrow_mut().push(MinibrowserEvent::NewWebView);
-                        }
-                    },
-                );
-            });
-
             // Add the new bottom panel with simple text input
             TopBottomPanel::bottom("llm_input").show(ctx, |ui| {
                 ui.allocate_ui_with_layout(
@@ -639,8 +639,10 @@ impl Minibrowser {
     /// Updates all fields taken from the given [WebViewManager], such as the location field.
     /// Returns true iff the egui needs an update.
     pub fn update_webview_data(&mut self, state: &RunningAppState) -> bool {
-        // Update URL prediction from the app state
-        let new_prediction_data = state.get_url_prediction_state_for_focused_webview();
+        // Update URL prediction from the app state (global prediction state)
+        let new_prediction_data = state
+            .get_url_prediction_state()
+            .map(|(_origin, input, predicted_urls)| (input, predicted_urls));
         let old_predictions = self.predicted_urls.borrow().clone();
         let old_input = self.prediction_input.borrow().clone();
 

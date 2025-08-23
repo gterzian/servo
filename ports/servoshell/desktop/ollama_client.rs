@@ -162,6 +162,7 @@ pub enum OllamaMessage {
 
 #[derive(Debug, Clone)]
 struct PendingUrlInput {
+    webview_id: WebViewId,
     input: String,
     current_url: String,
     timestamp: Instant,
@@ -250,8 +251,8 @@ struct OllamaWorker {
     prompts: Option<PromptTemplates>,
     webview_anchors: HashMap<WebViewId, AnchorState>,
     model_name: String,
-    // Debounce state for URL input - support multiple concurrent pending inputs
-    pending_url_inputs: HashMap<WebViewId, PendingUrlInput>,
+    // Debounce state for URL input - single pending input (overwrite previous)
+    pending_url_input: Option<PendingUrlInput>,
 }
 
 impl OllamaWorker {
@@ -267,8 +268,8 @@ impl OllamaWorker {
             event_loop_waker,
             prompts: None, // Load lazily in the worker thread
             webview_anchors: HashMap::new(),
-            model_name: "gemma3n:e4b".to_string(),
-            pending_url_inputs: HashMap::new(),
+            model_name: "gemma3n:e2b".to_string(),
+            pending_url_input: None,
         }
     }
 
@@ -297,45 +298,31 @@ impl OllamaWorker {
         self.prompts = Some(PromptTemplates::load());
 
         loop {
-            // Check for expired debounce timers
+            // Check for expired debounce timer for the single pending input
             let now = Instant::now();
-            let ready_webviews: Vec<_> = self
-                .pending_url_inputs
-                .iter()
-                .filter_map(|(webview_id, pending)| {
-                    // Process if timer expired, regardless of anchor state
-                    if now.duration_since(pending.timestamp) >= URL_INPUT_DEBOUNCE_TIMEOUT {
-                        Some(*webview_id)
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
-            // Process ready inputs (timer expired)
-            for webview_id in ready_webviews {
-                if let Some(pending) = self.pending_url_inputs.remove(&webview_id) {
+            if let Some(pending) = &self.pending_url_input {
+                if now.duration_since(pending.timestamp) >= URL_INPUT_DEBOUNCE_TIMEOUT {
+                    // Take the pending input and process it
+                    let pending = self.pending_url_input.take().unwrap();
                     self.process_url_input_with_anchors(
-                        webview_id,
+                        pending.webview_id,
                         pending.input,
                         pending.current_url,
                     );
+                    // Continue to next loop iteration to recalc timeouts
+                    continue;
                 }
             }
 
-            // Calculate the next timeout based on remaining pending inputs
-            let timeout_duration = self
-                .pending_url_inputs
-                .values()
-                .map(|pending| {
-                    let elapsed = now.duration_since(pending.timestamp);
-                    if elapsed >= URL_INPUT_DEBOUNCE_TIMEOUT {
-                        Duration::from_millis(0)
-                    } else {
-                        URL_INPUT_DEBOUNCE_TIMEOUT - elapsed
-                    }
-                })
-                .min();
+            // Calculate the next timeout based on the pending input
+            let timeout_duration = self.pending_url_input.as_ref().map(|pending| {
+                let elapsed = now.duration_since(pending.timestamp);
+                if elapsed >= URL_INPUT_DEBOUNCE_TIMEOUT {
+                    Duration::from_millis(0)
+                } else {
+                    URL_INPUT_DEBOUNCE_TIMEOUT - elapsed
+                }
+            });
 
             // Receive message with optional timeout for debouncing
             let received_msg = if let Some(timeout) = timeout_duration {
@@ -372,15 +359,13 @@ impl OllamaWorker {
                         input,
                         current_url,
                     } => {
-                        // Store or update pending input with new timestamp
-                        self.pending_url_inputs.insert(
+                        // Overwrite any existing pending input with the new one
+                        self.pending_url_input = Some(PendingUrlInput {
                             webview_id,
-                            PendingUrlInput {
-                                input,
-                                current_url,
-                                timestamp: Instant::now(),
-                            },
-                        );
+                            input,
+                            current_url,
+                            timestamp: Instant::now(),
+                        });
                         // Ensure anchors are requested for this webview
                         self.ensure_anchors_requested(webview_id);
                     },
@@ -404,15 +389,13 @@ impl OllamaWorker {
                                 input,
                                 current_url,
                             } => {
-                                // Update pending input with new timestamp
-                                self.pending_url_inputs.insert(
+                                // Overwrite any existing pending input with the new one
+                                self.pending_url_input = Some(PendingUrlInput {
                                     webview_id,
-                                    PendingUrlInput {
-                                        input,
-                                        current_url,
-                                        timestamp: Instant::now(),
-                                    },
-                                );
+                                    input,
+                                    current_url,
+                                    timestamp: Instant::now(),
+                                });
                                 // Ensure anchors are requested for this webview
                                 self.ensure_anchors_requested(webview_id);
                             },

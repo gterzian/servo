@@ -100,11 +100,11 @@ pub struct RunningAppStateInner {
     /// because every `WebView` shares a `RenderingContext`.
     need_repaint: bool,
 
-    /// URL predictions for webviews, mapped by WebViewId
-    url_predictions: HashMap<WebViewId, (String, Vec<String>)>, // (input, predicted_urls)
+    /// Latest URL prediction (originating webview id, input, predicted urls)
+    url_prediction: Option<(WebViewId, String, Vec<String>)>,
 
-    /// Pending URL predictions for webviews, mapped by WebViewId  
-    pending_url_predictions: HashMap<WebViewId, String>, // webview_id -> input_text
+    /// Pending URL prediction (originating webview id, input)
+    pending_url_prediction: Option<(WebViewId, String)>,
 }
 
 impl Drop for RunningAppState {
@@ -141,8 +141,8 @@ impl RunningAppState {
                 ollama_client: ollama_client::start_ollama_client(event_loop_waker),
                 need_update: false,
                 need_repaint: false,
-                url_predictions: HashMap::new(),
-                pending_url_predictions: HashMap::new(),
+                url_prediction: None,
+                pending_url_prediction: None,
             }),
         }
     }
@@ -639,10 +639,8 @@ impl RunningAppState {
                 .map(|url| url.to_string())
                 .unwrap_or_default();
 
-            // Update pending state
-            self.inner_mut()
-                .pending_url_predictions
-                .insert(webview_id, input.clone());
+            // Update single pending state (overwrite any previous pending prediction)
+            self.inner_mut().pending_url_prediction = Some((webview_id, input.clone()));
 
             // Send the input (get the client reference in a separate borrow)
             if let Some(ollama_client) = &self.inner().ollama_client {
@@ -662,35 +660,28 @@ impl RunningAppState {
         }
     }
 
-    /// Get URL prediction state for the focused webview
-    pub(crate) fn get_url_prediction_state_for_focused_webview(
-        &self,
-    ) -> Option<(String, Vec<String>)> {
-        if let Some(webview) = self.focused_webview() {
-            let inner = self.inner();
-            inner.url_predictions.get(&webview.id()).cloned()
-        } else {
-            None
-        }
+    /// Get the current URL prediction state (global for the browser).
+    ///
+    /// Returns `Some((origin_webview_id, input, predicted_urls))` when a prediction
+    /// has been produced by the LLM. The origin webview id is the webview that
+    /// was focused when the input was made. Callers can decide whether to show
+    /// or apply the prediction based on the focused webview.
+    pub(crate) fn get_url_prediction_state(&self) -> Option<(WebViewId, String, Vec<String>)> {
+        self.inner().url_prediction.clone()
     }
 
     /// Check if there are pending URL predictions for the focused webview
     pub(crate) fn has_pending_url_predictions(&self) -> bool {
-        if let Some(webview) = self.focused_webview() {
-            let inner = self.inner();
-            inner.pending_url_predictions.contains_key(&webview.id())
-        } else {
-            false
-        }
+        // Return true if there is any pending prediction (global)
+        self.inner().pending_url_prediction.is_some()
     }
 
-    /// Clear URL predictions and pending state for the focused webview
-    pub(crate) fn clear_url_predictions_for_focused_webview(&self) {
-        if let Some(webview) = self.focused_webview() {
-            let mut inner = self.inner_mut();
-            inner.url_predictions.remove(&webview.id());
-            inner.pending_url_predictions.remove(&webview.id());
-        }
+    /// Clear URL predictions and any pending prediction (global for the browser).
+    pub(crate) fn clear_url_predictions(&self) {
+        let mut inner = self.inner_mut();
+        inner.url_prediction = None;
+        inner.pending_url_prediction = None;
+        inner.need_update = true;
     }
 
     /// Handle browser action from ollama client
@@ -728,13 +719,12 @@ impl RunningAppState {
         input: String,
         predicted_urls: Vec<String>,
     ) {
+        println!("Handling url prediction");
         // Store the predictions and input in the inner state storage and trigger UI update
         let mut inner = self.inner_mut();
-        inner
-            .url_predictions
-            .insert(webview_id, (input, predicted_urls));
-        // Clear pending state since we now have actual predictions
-        inner.pending_url_predictions.remove(&webview_id);
+        inner.url_prediction = Some((webview_id, input, predicted_urls));
+        // Clear any pending prediction (we only keep origin id for context, not for pending state)
+        inner.pending_url_prediction = None;
         inner.need_update = true;
     }
 

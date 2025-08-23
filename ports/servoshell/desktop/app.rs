@@ -350,7 +350,7 @@ impl App {
                 },
                 MinibrowserEvent::ClearUrlPredictions => {
                     // Clear URL predictions from app state
-                    state.clear_url_predictions_for_focused_webview();
+                    state.clear_url_predictions();
                 },
             }
         }
