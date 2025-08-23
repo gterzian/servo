@@ -446,7 +446,8 @@ impl Minibrowser {
             let should_show_predictions = has_pending ||
                 (predictions.is_some() &&
                     !predictions.as_ref().unwrap().is_empty() &&
-                    prediction_input_text.as_ref() == Some(&current_location_text));
+                    prediction_input_text.as_ref() == Some(&current_location_text) ||
+                    current_location_text == "servo:newtab".to_string());
 
             if should_show_predictions {
                 TopBottomPanel::top("url_predictions")
