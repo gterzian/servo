@@ -29,6 +29,10 @@ You should assume the user does not type a url, but rather the name of a site. T
 Provide 1 or more of the most likely URL predictions, ordered by relevance, without duplicates, and making sure they are all valid URLs. 
 Your response should be a JSON array of URLs and nothing else. 
 
+Double check the spelling of urls.
+
+Assume safe browsing is on.
+
 Example response format:
 ```json
 ["https://github.com", "https://gitlab.com", "https://bitbucket.org"]
