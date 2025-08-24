@@ -250,9 +250,15 @@ struct OllamaWorker {
     event_loop_waker: Box<dyn EventLoopWaker>,
     prompts: Option<PromptTemplates>,
     webview_anchors: HashMap<WebViewId, AnchorState>,
-    model_name: String,
+    models: HashMap<Model, String>,
     // Debounce state for URL input - single pending input (overwrite previous)
     pending_url_input: Option<PendingUrlInput>,
+}
+
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
+pub enum Model {
+    Low,
+    High,
 }
 
 impl OllamaWorker {
@@ -268,7 +274,12 @@ impl OllamaWorker {
             event_loop_waker,
             prompts: None, // Load lazily in the worker thread
             webview_anchors: HashMap::new(),
-            model_name: "gemma3:1b".to_string(),
+            models: {
+                let mut m = HashMap::new();
+                m.insert(Model::Low, "gemma3:1b".to_string());
+                m.insert(Model::High, "gemma3n:e4b".to_string());
+                m
+            },
             pending_url_input: None,
         }
     }
@@ -296,6 +307,12 @@ impl OllamaWorker {
     fn run(mut self) {
         // Load prompts once at startup
         self.prompts = Some(PromptTemplates::load());
+
+        // Warm up models with a short "test" prompt.
+        let test_msg = Message::user("test");
+        for model_name in self.models.values() {
+            let _ = self.client.chat(model_name.clone(), vec![test_msg.clone()]);
+        }
 
         loop {
             // Check for expired debounce timer for the single pending input
@@ -420,7 +437,12 @@ impl OllamaWorker {
         let prompt = self.prompts.as_ref().unwrap().format_browser_action(&text);
         let user_message = Message::user(prompt);
 
-        match self.client.chat(&self.model_name, vec![user_message]) {
+        let model_name = self
+            .models
+            .get(&Model::Low)
+            .expect("Model::Low missing")
+            .clone();
+        match self.client.chat(&model_name, vec![user_message]) {
             Some(response) => {
                 let browser_action = self.parse_browser_action_response(&response.content);
                 self.send_response(OllamaResponse::BrowserAction(browser_action));
@@ -459,7 +481,17 @@ impl OllamaWorker {
         );
         let user_message = Message::user(prompt);
 
-        match self.client.chat(&self.model_name, vec![user_message]) {
+        let model_to_use = if anchor_urls.len() < 5 {
+            Model::Low
+        } else {
+            Model::High
+        };
+        let model_name = self
+            .models
+            .get(&model_to_use)
+            .expect("model missing")
+            .clone();
+        match self.client.chat(&model_name, vec![user_message]) {
             Some(response) => {
                 let predicted_urls = self.parse_url_prediction_response(&response.content);
                 self.send_response(OllamaResponse::UrlPrediction {
