@@ -268,7 +268,7 @@ impl OllamaWorker {
             event_loop_waker,
             prompts: None, // Load lazily in the worker thread
             webview_anchors: HashMap::new(),
-            model_name: "gemma3n:e2b".to_string(),
+            model_name: "gemma3:1b".to_string(),
             pending_url_input: None,
         }
     }
@@ -480,7 +480,13 @@ impl OllamaWorker {
     }
 
     fn parse_browser_action_response(&self, content: &str) -> BrowserAction {
-        let json_content = self.extract_json_from_response(content);
+        let json_content = match self.extract_json_from_response(content) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Failed to extract JSON from response: {}", e);
+                return BrowserAction::Nothing;
+            },
+        };
 
         match from_str::<Value>(json_content) {
             Ok(json) => {
@@ -515,7 +521,19 @@ impl OllamaWorker {
     }
 
     fn parse_url_prediction_response(&self, content: &str) -> Vec<String> {
-        let json_content = self.extract_json_from_response(content);
+        let json_content = match self.extract_json_from_response(content) {
+            Ok(s) => s,
+            Err(_) => {
+                // If JSON cannot be extracted, fall back to previous heuristic: treat
+                // the whole content as a possible single URL or return empty.
+                let trimmed = content.trim();
+                if !trimmed.is_empty() && (trimmed.starts_with("http") || trimmed.contains(".")) {
+                    return vec![trimmed.to_string()];
+                } else {
+                    return Vec::new();
+                }
+            },
+        };
 
         match from_str::<Value>(json_content) {
             Ok(json) => {
@@ -552,23 +570,35 @@ impl OllamaWorker {
         }
     }
 
-    fn extract_json_from_response<'a>(&self, content: &'a str) -> &'a str {
+    fn extract_json_from_response<'a>(&self, content: &'a str) -> Result<&'a str, String> {
         let content = content.trim();
 
         if content.starts_with("```json") && content.ends_with("```") {
-            content
+            let inner = content
                 .strip_prefix("```json")
                 .and_then(|s| s.strip_suffix("```"))
                 .unwrap_or(content)
-                .trim()
+                .trim();
+            if inner.is_empty() {
+                Err("empty json block".to_string())
+            } else {
+                Ok(inner)
+            }
         } else if content.starts_with("```") && content.ends_with("```") {
-            content
+            let inner = content
                 .strip_prefix("```")
                 .and_then(|s| s.strip_suffix("```"))
                 .unwrap_or(content)
-                .trim()
+                .trim();
+            if inner.is_empty() {
+                Err("empty fenced block".to_string())
+            } else {
+                Ok(inner)
+            }
+        } else if content.starts_with('{') || content.starts_with('[') {
+            Ok(content)
         } else {
-            content
+            Err("no JSON found in response".to_string())
         }
     }
 }
