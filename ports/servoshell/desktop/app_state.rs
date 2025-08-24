@@ -100,8 +100,11 @@ pub struct RunningAppStateInner {
     /// because every `WebView` shares a `RenderingContext`.
     need_repaint: bool,
 
-    /// Latest URL prediction (originating webview id, input, predicted urls)
-    url_prediction: Option<(WebViewId, String, Vec<String>)>,
+    /// Latest general URL prediction (originating webview id, input, predicted urls)
+    url_prediction_general: Option<(WebViewId, String, Vec<String>)>,
+
+    /// Latest anchored URL prediction (originating webview id, input, predicted urls)
+    url_prediction_anchored: Option<(WebViewId, String, Vec<String>)>,
 
     /// Pending URL prediction (originating webview id, input)
     pending_url_prediction: Option<(WebViewId, String)>,
@@ -141,7 +144,8 @@ impl RunningAppState {
                 ollama_client: ollama_client::start_ollama_client(event_loop_waker),
                 need_update: false,
                 need_repaint: false,
-                url_prediction: None,
+                url_prediction_general: None,
+                url_prediction_anchored: None,
                 pending_url_prediction: None,
             }),
         }
@@ -340,9 +344,10 @@ impl RunningAppState {
     }
 
     pub fn focused_webview(&self) -> Option<WebView> {
-        self.inner()
+        let inner = self.inner();
+        inner
             .focused_webview_id
-            .and_then(|id| self.inner().webviews.get(&id).cloned())
+            .and_then(|id| inner.webviews.get(&id).cloned())
     }
 
     // Returns the webviews in the creation order.
@@ -389,8 +394,9 @@ impl RunningAppState {
                         webview_id,
                         input,
                         predicted_urls,
+                        anchored,
                     } => {
-                        self.handle_url_prediction(webview_id, input, predicted_urls);
+                        self.handle_url_prediction(webview_id, input, predicted_urls, anchored);
                     },
                     OllamaResponse::RequestAnchors { webview_id } => {
                         self.handle_request_anchors(webview_id);
@@ -649,6 +655,28 @@ impl RunningAppState {
         }
     }
 
+    /// Explicitly request an anchored prediction (using current page anchors) from the LLM.
+    pub(crate) fn send_url_input_with_anchors(&self, webview_id: WebViewId, input: String) {
+        // First check if we have an ollama client
+        if let Some(ollama_client) = &self.inner().ollama_client {
+            let current_url = self
+                .webview_by_id(webview_id)
+                .and_then(|webview| webview.url())
+                .map(|u| u.to_string())
+                .unwrap_or_default();
+
+            // Indicate an in-flight anchored prediction by setting `url_prediction_anchored`
+            // to a placeholder tuple with an empty results vector. This hides the anchored
+            // request button immediately and allows the UI to show a spinner. We do not
+            // clear existing anchored predictions here; they will be overwritten when
+            // the anchored response arrives, and they'll be cleared if the user types.
+            self.inner_mut().url_prediction_anchored =
+                Some((webview_id, input.clone(), Vec::new()));
+
+            ollama_client.send_url_input_with_anchors(webview_id, input, current_url);
+        }
+    }
+
     /// Send anchor URLs to the ollama client
     pub(crate) fn send_anchor_urls(
         &self,
@@ -666,20 +694,46 @@ impl RunningAppState {
     /// has been produced by the LLM. The origin webview id is the webview that
     /// was focused when the input was made. Callers can decide whether to show
     /// or apply the prediction based on the focused webview.
-    pub(crate) fn get_url_prediction_state(&self) -> Option<(WebViewId, String, Vec<String>)> {
-        self.inner().url_prediction.clone()
+    /// Returns (origin_webview_id, input, general_predictions, anchored_predictions_opt)
+    pub(crate) fn get_url_prediction_state(
+        &self,
+    ) -> Option<(WebViewId, String, Vec<String>, Option<Vec<String>>)> {
+        let inner = self.inner();
+        match (
+            &inner.url_prediction_general,
+            &inner.url_prediction_anchored,
+        ) {
+            (Some((id, input, general)), Some((aid, ainput, anchored)))
+                if id == aid && input == ainput =>
+            {
+                Some((*id, input.clone(), general.clone(), Some(anchored.clone())))
+            },
+            (Some((id, input, general)), _) => Some((*id, input.clone(), general.clone(), None)),
+            (None, Some((id, input, anchored))) => {
+                Some((*id, input.clone(), Vec::new(), Some(anchored.clone())))
+            },
+            _ => None,
+        }
     }
 
     /// Check if there are pending URL predictions for the focused webview
     pub(crate) fn has_pending_url_predictions(&self) -> bool {
-        // Return true if there is any pending prediction (global)
-        self.inner().pending_url_prediction.is_some()
+        // Return true if there is any pending prediction (global) or an in-flight anchored prediction.
+        let inner = self.inner();
+        inner.pending_url_prediction.is_some() || inner.url_prediction_anchored.is_some()
+    }
+
+    /// Return a clone of the pending URL prediction if present.
+    /// This avoids externally accessing private fields on RunningAppStateInner.
+    pub(crate) fn take_pending_url_prediction(&self) -> Option<(WebViewId, String)> {
+        self.inner().pending_url_prediction.clone()
     }
 
     /// Clear URL predictions and any pending prediction (global for the browser).
     pub(crate) fn clear_url_predictions(&self) {
         let mut inner = self.inner_mut();
-        inner.url_prediction = None;
+        inner.url_prediction_general = None;
+        inner.url_prediction_anchored = None;
         inner.pending_url_prediction = None;
         inner.need_update = true;
     }
@@ -718,13 +772,24 @@ impl RunningAppState {
         webview_id: WebViewId,
         input: String,
         predicted_urls: Vec<String>,
+        anchored: bool,
     ) {
-        println!("Handling url prediction");
         // Store the predictions and input in the inner state storage and trigger UI update
         let mut inner = self.inner_mut();
-        inner.url_prediction = Some((webview_id, input, predicted_urls));
-        // Clear any pending prediction (we only keep origin id for context, not for pending state)
-        inner.pending_url_prediction = None;
+
+        if !anchored {
+            // General prediction: replace the general predictions and clear pending state
+            inner.url_prediction_general = Some((webview_id, input, predicted_urls));
+            inner.pending_url_prediction = None;
+            // When a new general prediction arrives, clear previously fetched anchored predictions
+            inner.url_prediction_anchored = None;
+        } else {
+            // Anchored prediction: set anchored predictions for this origin/input
+            inner.url_prediction_anchored = Some((webview_id, input, predicted_urls));
+            // Clear pending state since anchored prediction was requested/completed
+            inner.pending_url_prediction = None;
+        }
+
         inner.need_update = true;
     }
 

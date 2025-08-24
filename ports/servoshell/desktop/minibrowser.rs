@@ -56,6 +56,9 @@ pub struct Minibrowser {
     /// Stores the current URL predictions for the address bar
     predicted_urls: RefCell<Option<Vec<String>>>,
 
+    /// Stores the page-anchored URL predictions (separate from general predictions)
+    predicted_urls_anchored: RefCell<Option<Vec<String>>>,
+
     /// Stores the input text that the current predictions were made for
     prediction_input: RefCell<Option<String>>,
 }
@@ -72,6 +75,8 @@ pub enum MinibrowserEvent {
     LLMInput(String),
     /// Address bar text changed.
     AddressBarInput(String),
+    /// Request a prediction that uses the current page anchors (user clicked the bottom item)
+    RequestAnchoredPrediction(String),
     /// Clear URL predictions.
     ClearUrlPredictions,
 }
@@ -130,6 +135,8 @@ impl Minibrowser {
             bottom_text_input: RefCell::new(String::new()),
             // Initialize URL prediction tracking
             predicted_urls: RefCell::new(None),
+            // Initialize anchored URL prediction tracking
+            predicted_urls_anchored: RefCell::new(None),
             // Initialize prediction input tracking
             prediction_input: RefCell::new(None),
         }
@@ -310,6 +317,7 @@ impl Minibrowser {
             location_dirty,
             bottom_text_input,
             predicted_urls,
+            predicted_urls_anchored,
             prediction_input,
             load_status,
             ..
@@ -444,6 +452,7 @@ impl Minibrowser {
             // the rendering avoids allocations while preventing borrow conflicts
             // when we mutate after rendering.
             let predictions_ref = predicted_urls.borrow();
+            let anchored_predictions_ref = predicted_urls_anchored.borrow();
             let prediction_input_ref = prediction_input.borrow();
             let current_location_ref = location.borrow();
 
@@ -453,7 +462,9 @@ impl Minibrowser {
                     !predictions_ref.as_ref().unwrap().is_empty() &&
                     (prediction_input_ref.as_ref().map(|s| s.as_str()) ==
                         Some(current_location_ref.as_str()) ||
-                        current_location_ref.as_str() == "servo:newtab"));
+                        current_location_ref.as_str() == "servo:newtab")) ||
+                (anchored_predictions_ref.is_some() &&
+                    !anchored_predictions_ref.as_ref().unwrap().is_empty());
 
             // Track the selected URL (clone only the chosen string) so we can mutate
             // the RefCells after dropping the immutable borrows.
@@ -475,11 +486,58 @@ impl Minibrowser {
                                     ui.spinner();
                                     ui.label("Predicting URLs...");
                                 });
-                            } else if let Some(predicted_urls_vec) = predictions_ref.as_ref() {
-                                for predicted_url in predicted_urls_vec.iter() {
-                                    if ui.button(predicted_url).clicked() {
-                                        // Clone only the clicked URL (single allocation on selection)
-                                        selected_prediction = Some(predicted_url.clone());
+                            } else {
+                                // Render general (quick) predictions first
+                                if let Some(predicted_urls_vec) = predictions_ref.as_ref() {
+                                    for predicted_url in predicted_urls_vec.iter() {
+                                        if ui.button(predicted_url).clicked() {
+                                            // Clone only the clicked URL (single allocation on selection)
+                                            selected_prediction = Some(predicted_url.clone());
+                                        }
+                                    }
+
+                                    // Add a small separator + action to request anchored prediction
+                                    if !predicted_urls_vec.is_empty() {
+                                        ui.separator();
+                                        // Only show the anchored prediction action if we don't already have anchored predictions.
+                                        let has_anchored = anchored_predictions_ref
+                                            .as_ref()
+                                            .map(|v| !v.is_empty())
+                                            .unwrap_or(false);
+                                        // Don't show the anchored prediction action if we already have anchored
+                                        // predictions or if the current page is the default empty new tab.
+                                        if !has_anchored &&
+                                            current_location_ref.as_str() != "servo:newtab"
+                                        {
+                                            // Only permit requesting anchored predictions when general suggestions exist.
+                                            // Disable the button while an anchored request is pending.
+                                            let btn = egui::Button::new(
+                                                "Predict using current page context",
+                                            );
+                                            if ui.add_enabled(!has_pending, btn).clicked() {
+                                                // Capture the current address bar contents and send them with the event
+                                                // so the app can immediately request an anchored prediction.
+                                                let current_location = current_location_ref.clone();
+                                                event_queue.borrow_mut().push(
+                                                    MinibrowserEvent::RequestAnchoredPrediction(
+                                                        current_location,
+                                                    ),
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Render anchored (page-specific) predictions below a small label
+                                if let Some(anchored_vec) = anchored_predictions_ref.as_ref() {
+                                    if !anchored_vec.is_empty() {
+                                        ui.separator();
+                                        ui.label("Page-specific suggestions:");
+                                        for a in anchored_vec.iter() {
+                                            if ui.button(a).clicked() {
+                                                selected_prediction = Some(a.clone());
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -489,6 +547,7 @@ impl Minibrowser {
 
             // Drop the immutable borrows before performing any mutations
             drop(predictions_ref);
+            drop(anchored_predictions_ref);
             drop(prediction_input_ref);
             drop(current_location_ref);
 
@@ -500,6 +559,7 @@ impl Minibrowser {
 
                 // Clear predictions to hide the dropdown immediately
                 *predicted_urls.borrow_mut() = None;
+                *predicted_urls_anchored.borrow_mut() = None;
                 *prediction_input.borrow_mut() = None;
 
                 // Clear predictions from app state too and navigate
@@ -662,24 +722,32 @@ impl Minibrowser {
     /// Returns true iff the egui needs an update.
     pub fn update_webview_data(&mut self, state: &RunningAppState) -> bool {
         // Update URL prediction from the app state (global prediction state)
-        let new_prediction_data = state
-            .get_url_prediction_state()
-            .map(|(_origin, input, predicted_urls)| (input, predicted_urls));
+        let new_prediction_data = state.get_url_prediction_state().map(
+            |(_origin, input, predicted_urls, anchored_urls)| {
+                (input, predicted_urls, anchored_urls)
+            },
+        );
+
         let old_predictions = self.predicted_urls.borrow().clone();
+        let old_anchored = self.predicted_urls_anchored.borrow().clone();
         let old_input = self.prediction_input.borrow().clone();
 
         // Extract new values or use None
-        let (new_predictions, new_input) = match new_prediction_data {
-            Some((input, predicted_urls)) => (Some(predicted_urls), Some(input)),
-            None => (None, None),
+        let (new_predictions, new_anchored, new_input) = match new_prediction_data {
+            Some((input, predicted_urls, anchored_urls)) => {
+                (Some(predicted_urls), anchored_urls, Some(input))
+            },
+            None => (None, None, None),
         };
 
         // Update stored values
         *self.predicted_urls.borrow_mut() = new_predictions;
+        *self.predicted_urls_anchored.borrow_mut() = new_anchored;
         *self.prediction_input.borrow_mut() = new_input;
 
         // Check if anything changed
         let prediction_changed = old_predictions != *self.predicted_urls.borrow() ||
+            old_anchored != *self.predicted_urls_anchored.borrow() ||
             old_input != *self.prediction_input.borrow();
 
         // Note: We must use the "bitwise OR" (|) operator here instead of "logical OR" (||)

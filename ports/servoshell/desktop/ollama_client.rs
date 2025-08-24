@@ -22,17 +22,20 @@ const URL_INPUT_DEBOUNCE_TIMEOUT: Duration = Duration::from_millis(500);
 
 struct PromptTemplates {
     browser_action: String,
-    url_prediction: String,
+    url_prediction_general: String,
+    url_prediction_with_anchors: String,
 }
 
 impl PromptTemplates {
     fn load() -> Self {
         let browser_action = Self::load_prompt("browser_action.md");
-        let url_prediction = Self::load_prompt("url_prediction.md");
+        let url_prediction_general = Self::load_prompt("url_prediction.md");
+        let url_prediction_with_anchors = Self::load_prompt("url_prediction_with_anchors.md");
 
         Self {
             browser_action,
-            url_prediction,
+            url_prediction_general,
+            url_prediction_with_anchors,
         }
     }
 
@@ -49,14 +52,19 @@ impl PromptTemplates {
         self.browser_action.replace("{user_input}", user_input)
     }
 
-    fn format_url_prediction(
+    fn format_url_prediction_general(&self, user_input: &str) -> String {
+        self.url_prediction_general
+            .replace("{user_input}", user_input)
+    }
+
+    fn format_url_prediction_with_anchors(
         &self,
         user_input: &str,
         current_url: &str,
         anchor_urls: &[ServoUrl],
     ) -> String {
         let anchor_urls_formatted = Self::format_anchor_urls(anchor_urls);
-        self.url_prediction
+        self.url_prediction_with_anchors
             .replace("{user_input}", user_input)
             .replace("{current_url}", current_url)
             .replace("{anchor_urls}", &anchor_urls_formatted)
@@ -156,6 +164,11 @@ pub enum OllamaMessage {
         input: String,
         current_url: String,
     },
+    UrlInputWithAnchors {
+        webview_id: WebViewId,
+        input: String,
+        current_url: String,
+    },
     AnchorUrls(WebViewId, Vec<ServoUrl>),
     Exit,
 }
@@ -175,6 +188,7 @@ pub enum OllamaResponse {
         webview_id: WebViewId,
         input: String,
         predicted_urls: Vec<String>,
+        anchored: bool,
     },
     RequestAnchors {
         webview_id: WebViewId,
@@ -208,6 +222,19 @@ impl OllamaHandle {
 
     pub fn send_url_input(&self, webview_id: WebViewId, input: String, current_url: String) {
         let _ = self.sender.send(OllamaMessage::UrlInput {
+            webview_id,
+            input,
+            current_url,
+        });
+    }
+
+    pub fn send_url_input_with_anchors(
+        &self,
+        webview_id: WebViewId,
+        input: String,
+        current_url: String,
+    ) {
+        let _ = self.sender.send(OllamaMessage::UrlInputWithAnchors {
             webview_id,
             input,
             current_url,
@@ -321,11 +348,8 @@ impl OllamaWorker {
                 if now.duration_since(pending.timestamp) >= URL_INPUT_DEBOUNCE_TIMEOUT {
                     // Take the pending input and process it
                     let pending = self.pending_url_input.take().unwrap();
-                    self.process_url_input_with_anchors(
-                        pending.webview_id,
-                        pending.input,
-                        pending.current_url,
-                    );
+                    self.run_general_url_prediction(pending.webview_id, pending.input.clone());
+
                     // Continue to next loop iteration to recalc timeouts
                     continue;
                 }
@@ -376,15 +400,31 @@ impl OllamaWorker {
                         input,
                         current_url,
                     } => {
-                        // Overwrite any existing pending input with the new one
+                        // Ensure anchors are requested for this webview so the debounced anchored prediction
+                        // can run when ready or when user requests it explicitly.
+                        self.ensure_anchors_requested(webview_id);
+
+                        // Overwrite any existing pending input with the new one for the anchored prediction
                         self.pending_url_input = Some(PendingUrlInput {
                             webview_id,
                             input,
                             current_url,
                             timestamp: Instant::now(),
                         });
-                        // Ensure anchors are requested for this webview
-                        self.ensure_anchors_requested(webview_id);
+                    },
+                    OllamaMessage::UrlInputWithAnchors {
+                        webview_id,
+                        input,
+                        current_url,
+                    } => {
+                        // Explicit request to run anchored prediction now (user clicked "predict using current page context")
+                        // If anchors are available, run immediately; otherwise request anchors and keep pending state.
+                        let anchor_urls = match self.webview_anchors.get(&webview_id) {
+                            Some(AnchorState::Done(urls)) => urls.clone(),
+                            _ => Vec::new(),
+                        };
+                        // Always make the prediction, even if we haven't received the anchors yet.
+                        self.process_url_input_with_anchors(webview_id, input, current_url);
                     },
                     OllamaMessage::AnchorUrls(webview_id, urls) => {
                         self.handle_anchor_urls(webview_id, urls);
@@ -415,6 +455,18 @@ impl OllamaWorker {
                                 });
                                 // Ensure anchors are requested for this webview
                                 self.ensure_anchors_requested(webview_id);
+                            },
+                            OllamaMessage::UrlInputWithAnchors {
+                                webview_id,
+                                input,
+                                current_url,
+                            } => {
+                                // Immediate request to run anchored prediction now
+                                let anchor_urls = match self.webview_anchors.get(&webview_id) {
+                                    Some(AnchorState::Done(urls)) => urls.clone(),
+                                    _ => Vec::new(),
+                                };
+                                self.process_url_input_with_anchors(webview_id, input, current_url);
                             },
                             OllamaMessage::AnchorUrls(webview_id, urls) => {
                                 self.handle_anchor_urls(webview_id, urls);
@@ -474,21 +526,15 @@ impl OllamaWorker {
             _ => Vec::new(), // No anchors available yet, proceed with empty list
         };
 
-        let prompt = self.prompts.as_ref().unwrap().format_url_prediction(
-            &input,
-            &current_url,
-            &anchor_urls,
-        );
+        let prompt = self
+            .prompts
+            .as_ref()
+            .unwrap()
+            .format_url_prediction_with_anchors(&input, &current_url, &anchor_urls);
         let user_message = Message::user(prompt);
-
-        let model_to_use = if anchor_urls.len() < 5 {
-            Model::Low
-        } else {
-            Model::High
-        };
         let model_name = self
             .models
-            .get(&model_to_use)
+            .get(&Model::High)
             .expect("model missing")
             .clone();
         match self.client.chat(&model_name, vec![user_message]) {
@@ -498,6 +544,7 @@ impl OllamaWorker {
                     webview_id,
                     input: input.clone(),
                     predicted_urls,
+                    anchored: true,
                 });
             },
             None => {
@@ -506,6 +553,43 @@ impl OllamaWorker {
                     webview_id,
                     input: input.clone(),
                     predicted_urls: Vec::new(),
+                    anchored: true,
+                });
+            },
+        }
+    }
+
+    /// Run a quick general URL prediction using only the user input and the generic prompt
+    /// This is called immediately on UrlInput so the UI can show instant suggestions.
+    fn run_general_url_prediction(&mut self, webview_id: WebViewId, input: String) {
+        let prompt = self
+            .prompts
+            .as_ref()
+            .unwrap()
+            .format_url_prediction_general(&input);
+        let user_message = Message::user(prompt);
+        let model_name = self
+            .models
+            .get(&Model::Low)
+            .expect("Model::Low missing")
+            .clone();
+        match self.client.chat(&model_name, vec![user_message]) {
+            Some(response) => {
+                let predicted_urls = self.parse_url_prediction_response(&response.content);
+                self.send_response(OllamaResponse::UrlPrediction {
+                    webview_id,
+                    input: input.clone(),
+                    predicted_urls,
+                    anchored: false,
+                });
+            },
+            None => {
+                eprintln!("General URL prediction error");
+                self.send_response(OllamaResponse::UrlPrediction {
+                    webview_id,
+                    input: input.clone(),
+                    predicted_urls: Vec::new(),
+                    anchored: false,
                 });
             },
         }

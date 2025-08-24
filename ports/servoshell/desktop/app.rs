@@ -348,6 +348,12 @@ impl App {
                         state.send_url_input(focused_webview.id(), text);
                     }
                 },
+                MinibrowserEvent::RequestAnchoredPrediction(input) => {
+                    if let Some(focused_webview) = state.focused_webview() {
+                        // Ask running_state to request anchored prediction using the provided input
+                        state.send_url_input_with_anchors(focused_webview.id(), input);
+                    }
+                },
                 MinibrowserEvent::ClearUrlPredictions => {
                     // Clear URL predictions from app state
                     state.clear_url_predictions();
