@@ -106,8 +106,8 @@ pub struct RunningAppStateInner {
     /// Latest anchored URL prediction (originating webview id, input, predicted urls)
     url_prediction_anchored: Option<(WebViewId, String, Vec<String>)>,
 
-    /// Pending URL prediction (originating webview id, input)
-    pending_url_prediction: Option<(WebViewId, String)>,
+    /// Pending URL prediction (originating webview id, input, anchored)
+    pending_url_prediction: Option<(WebViewId, String, bool)>,
 }
 
 impl Drop for RunningAppState {
@@ -646,7 +646,8 @@ impl RunningAppState {
                 .unwrap_or_default();
 
             // Update single pending state (overwrite any previous pending prediction)
-            self.inner_mut().pending_url_prediction = Some((webview_id, input.clone()));
+            // Mark as non-anchored (general) prediction.
+            self.inner_mut().pending_url_prediction = Some((webview_id, input.clone(), false));
 
             // Send the input (get the client reference in a separate borrow)
             if let Some(ollama_client) = &self.inner().ollama_client {
@@ -657,12 +658,9 @@ impl RunningAppState {
 
     /// Explicitly request an anchored prediction (using current page anchors) from the LLM.
     pub(crate) fn send_url_input_with_anchors(&self, webview_id: WebViewId, input: String) {
-        // Indicate an in-flight anchored prediction by setting `url_prediction_anchored`
-        // to a placeholder tuple with an empty results vector. This hides the anchored
-        // request button immediately and allows the UI to show a spinner. We do not
-        // clear existing anchored predictions here; they will be overwritten when
-        // the anchored response arrives, and they'll be cleared if the user types.
+        // Mark that an anchored prediction is now in-flight and store pending state.
         self.inner_mut().url_prediction_anchored = Some((webview_id, input.clone(), Vec::new()));
+        self.inner_mut().pending_url_prediction = Some((webview_id, input.clone(), true));
 
         if let Some(ollama_client) = &self.inner().ollama_client {
             let current_url = self
@@ -716,15 +714,19 @@ impl RunningAppState {
 
     /// Check if there are pending URL predictions for the focused webview
     pub(crate) fn has_pending_url_predictions(&self) -> bool {
-        // Return true if there is any pending prediction (global) or an in-flight anchored prediction.
+        // Return true if there is any pending prediction (global).
         let inner = self.inner();
-        inner.pending_url_prediction.is_some() || inner.url_prediction_anchored.is_some()
+        inner.pending_url_prediction.is_some()
     }
 
     /// Return a clone of the pending URL prediction if present.
     /// This avoids externally accessing private fields on RunningAppStateInner.
     pub(crate) fn take_pending_url_prediction(&self) -> Option<(WebViewId, String)> {
-        self.inner().pending_url_prediction.clone()
+        // Map the internal (id, input, anchored) to the outward shape (id, input)
+        self.inner()
+            .pending_url_prediction
+            .clone()
+            .map(|(id, input, _anchored)| (id, input))
     }
 
     /// Clear URL predictions and any pending prediction (global for the browser).
