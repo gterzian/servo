@@ -464,7 +464,11 @@ impl Minibrowser {
                     !predictions_ref.as_ref().unwrap().is_empty() &&
                     (prediction_input_ref.as_ref().map(|s| s.as_str()) ==
                         Some(current_location_ref.as_str()) ||
-                        current_location_ref.as_str() == "servo:newtab")) ||
+                        state
+                            .focused_webview()
+                            .and_then(|w| w.url().map(|u| u.to_string()))
+                            .as_deref() ==
+                            Some("servo:newtab"))) ||
                 anchored_predictions_ref.is_some();
 
             // Track the selected URL (clone only the chosen string) so we can mutate
@@ -502,7 +506,6 @@ impl Minibrowser {
 
                                     // Add a small separator + action to request anchored prediction
                                     if !predicted_urls_vec.is_empty() {
-                                        ui.separator();
                                         // Only show the anchored prediction action if we don't already have anchored predictions.
                                         let has_anchored = anchored_predictions_ref
                                             .as_ref()
@@ -511,9 +514,14 @@ impl Minibrowser {
                                         // Don't show the anchored prediction action if we already have anchored
                                         // predictions or if the current page is the default empty new tab.
                                         if !has_anchored &&
-                                            current_location_ref.as_str() != "servo:newtab" &&
+                                            state
+                                                .focused_webview()
+                                                .and_then(|w| w.url().map(|u| u.to_string()))
+                                                .as_deref() !=
+                                                Some("servo:newtab") &&
                                             !has_pending_anchored
                                         {
+                                            ui.separator();
                                             // Only permit requesting anchored predictions when general suggestions exist.
                                             // Disable the button while an anchored request is pending.
                                             let btn = egui::Button::new(

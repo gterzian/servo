@@ -684,13 +684,6 @@ impl RunningAppState {
         }
     }
 
-    /// Get the current URL prediction state (global for the browser).
-    ///
-    /// Returns `Some((origin_webview_id, input, predicted_urls))` when a prediction
-    /// has been produced by the LLM. The origin webview id is the webview that
-    /// was focused when the input was made. Callers can decide whether to show
-    /// or apply the prediction based on the focused webview.
-    /// Returns (origin_webview_id, input, general_predictions, anchored_predictions_opt)
     pub(crate) fn get_url_prediction_state(
         &self,
     ) -> Option<(WebViewId, String, Vec<String>, Option<Vec<String>>)> {
@@ -699,16 +692,12 @@ impl RunningAppState {
             &inner.url_prediction_general,
             &inner.url_prediction_anchored,
         ) {
-            (Some((id, input, general)), Some((aid, ainput, anchored)))
-                if id == aid && input == ainput =>
-            {
-                Some((*id, input.clone(), general.clone(), Some(anchored.clone())))
+            (Some((id, input, general)), Some((aid, ainput, anchored))) => {
+                Some((*aid, input.clone(), general.clone(), Some(anchored.clone())))
             },
-            (Some((id, input, general)), _) => Some((*id, input.clone(), general.clone(), None)),
-            (None, Some((id, input, anchored))) => {
-                Some((*id, input.clone(), Vec::new(), Some(anchored.clone())))
-            },
-            _ => None,
+            (Some((id, input, general)), None) => Some((*id, input.clone(), general.clone(), None)),
+            (None, Some(_)) => unreachable!("Anchored predictions should not clear general ones."),
+            (None, None) => None,
         }
     }
 

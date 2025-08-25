@@ -674,15 +674,7 @@ impl OllamaWorker {
                     }
                 }
             },
-            Err(_) => {
-                // If JSON parsing fails, try to treat the content as a single URL
-                let trimmed = content.trim();
-                if !trimmed.is_empty() && (trimmed.starts_with("http") || trimmed.contains(".")) {
-                    vec![trimmed.to_string()]
-                } else {
-                    Vec::new()
-                }
-            },
+            Err(_) => Vec::new(),
         }
     }
 
