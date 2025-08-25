@@ -657,21 +657,19 @@ impl RunningAppState {
 
     /// Explicitly request an anchored prediction (using current page anchors) from the LLM.
     pub(crate) fn send_url_input_with_anchors(&self, webview_id: WebViewId, input: String) {
-        // First check if we have an ollama client
+        // Indicate an in-flight anchored prediction by setting `url_prediction_anchored`
+        // to a placeholder tuple with an empty results vector. This hides the anchored
+        // request button immediately and allows the UI to show a spinner. We do not
+        // clear existing anchored predictions here; they will be overwritten when
+        // the anchored response arrives, and they'll be cleared if the user types.
+        self.inner_mut().url_prediction_anchored = Some((webview_id, input.clone(), Vec::new()));
+
         if let Some(ollama_client) = &self.inner().ollama_client {
             let current_url = self
                 .webview_by_id(webview_id)
                 .and_then(|webview| webview.url())
                 .map(|u| u.to_string())
                 .unwrap_or_default();
-
-            // Indicate an in-flight anchored prediction by setting `url_prediction_anchored`
-            // to a placeholder tuple with an empty results vector. This hides the anchored
-            // request button immediately and allows the UI to show a spinner. We do not
-            // clear existing anchored predictions here; they will be overwritten when
-            // the anchored response arrives, and they'll be cleared if the user types.
-            self.inner_mut().url_prediction_anchored =
-                Some((webview_id, input.clone(), Vec::new()));
 
             ollama_client.send_url_input_with_anchors(webview_id, input, current_url);
         }
