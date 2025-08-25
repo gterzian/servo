@@ -61,6 +61,8 @@ pub struct Minibrowser {
 
     /// Stores the input text that the current predictions were made for
     prediction_input: RefCell<Option<String>>,
+    /// Currently focused webview id (cached from app state).
+    focused_webview: RefCell<Option<WebViewId>>,
 }
 
 pub enum MinibrowserEvent {
@@ -139,6 +141,8 @@ impl Minibrowser {
             predicted_urls_anchored: RefCell::new(None),
             // Initialize prediction input tracking
             prediction_input: RefCell::new(None),
+            // Initialize focused webview cache
+            focused_webview: RefCell::new(None),
         }
     }
 
@@ -717,6 +721,18 @@ impl Minibrowser {
         }
     }
 
+    /// Update the cached focused webview id from the running app state and return true iff it changed.
+    pub fn update_focused_webview(&mut self, state: &RunningAppState) -> bool {
+        let new_focused = state.focused_webview().map(|w| w.id());
+        let old = self.focused_webview.borrow().clone();
+        if old != new_focused {
+            *self.focused_webview.borrow_mut() = new_focused;
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn update_location_dirty(&self, dirty: bool) {
         self.location_dirty.set(dirty);
     }
@@ -774,7 +790,8 @@ impl Minibrowser {
         //       because logical OR would short-circuit if any of the functions return true.
         //       We want to ensure that all functions are called. The "bitwise OR" operator
         //       does not short-circuit.
-        self.update_location_in_toolbar(state) |
+        self.update_focused_webview(state) |
+            self.update_location_in_toolbar(state) |
             self.update_load_status(state) |
             self.update_status_text(state) |
             prediction_changed
