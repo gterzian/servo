@@ -445,7 +445,9 @@ impl Minibrowser {
             };
 
             // URL predictions dropdown below address bar
-            let has_pending = state.has_pending_url_predictions();
+            let has_pending_general = state.has_pending_general();
+            let has_pending_anchored = state.has_pending_anchored();
+            let has_pending = has_pending_general || has_pending_anchored;
 
             // Borrow contents without cloning; we will only clone the single
             // selected URL if the user clicks it. Keeping the borrow scoped to
@@ -479,12 +481,15 @@ impl Minibrowser {
                     )
                     .show(ctx, |ui| {
                         ui.vertical(|ui| {
-                            if has_pending {
-                                // Show spinning indicator or "pending..." text
+                            // If a general prediction is pending: show only spinner + text for general predictions.
+                            if has_pending_general {
                                 ui.horizontal(|ui| {
                                     ui.spinner();
                                     ui.label("Predicting URLs...");
                                 });
+
+                                // When general is pending, do not show the general predictions list.
+                                // Anchored pending should not be shown separately in this state.
                             } else {
                                 // Render general (quick) predictions first
                                 if let Some(predicted_urls_vec) = predictions_ref.as_ref() {
@@ -506,7 +511,8 @@ impl Minibrowser {
                                         // Don't show the anchored prediction action if we already have anchored
                                         // predictions or if the current page is the default empty new tab.
                                         if !has_anchored &&
-                                            current_location_ref.as_str() != "servo:newtab"
+                                            current_location_ref.as_str() != "servo:newtab" &&
+                                            !has_pending_anchored
                                         {
                                             // Only permit requesting anchored predictions when general suggestions exist.
                                             // Disable the button while an anchored request is pending.
@@ -527,8 +533,15 @@ impl Minibrowser {
                                     }
                                 }
 
-                                // Render anchored (page-specific) predictions below a small label
-                                if let Some(anchored_vec) = anchored_predictions_ref.as_ref() {
+                                if has_pending_anchored {
+                                    ui.separator();
+                                    ui.label("Page-specific suggestions:");
+                                    ui.horizontal(|ui| {
+                                        ui.spinner();
+                                        ui.label("Predicting page-specific URLs...");
+                                    });
+                                } else if let Some(anchored_vec) = anchored_predictions_ref.as_ref()
+                                {
                                     if !anchored_vec.is_empty() {
                                         ui.separator();
                                         ui.label("Page-specific suggestions:");

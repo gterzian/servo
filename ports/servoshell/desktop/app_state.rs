@@ -719,6 +719,24 @@ impl RunningAppState {
         inner.pending_url_prediction.is_some()
     }
 
+    /// Return true if there is a pending general (non-anchored) URL prediction.
+    pub(crate) fn has_pending_general(&self) -> bool {
+        let inner = self.inner();
+        match inner.pending_url_prediction.as_ref() {
+            Some((_id, _input, anchored)) => !*anchored,
+            None => false,
+        }
+    }
+
+    /// Return true if there is a pending anchored (page-specific) URL prediction.
+    pub(crate) fn has_pending_anchored(&self) -> bool {
+        let inner = self.inner();
+        match inner.pending_url_prediction.as_ref() {
+            Some((_id, _input, anchored)) => *anchored,
+            None => false,
+        }
+    }
+
     /// Return a clone of the pending URL prediction if present.
     /// This avoids externally accessing private fields on RunningAppStateInner.
     pub(crate) fn take_pending_url_prediction(&self) -> Option<(WebViewId, String)> {
