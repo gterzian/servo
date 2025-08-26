@@ -480,13 +480,11 @@ impl Minibrowser {
             let mut selected_prediction: Option<String> = None;
 
             if should_show_predictions {
+                let frame = egui::Frame::default()
+                    .fill(ctx.style().visuals.window_fill)
+                    .inner_margin(4.0);
                 TopBottomPanel::top("url_predictions")
-                    .frame(
-                        egui::Frame::default()
-                            .fill(ctx.style().visuals.window_fill)
-                            .inner_margin(4.0)
-                            .stroke(egui::Stroke::new(1.0, ctx.style().visuals.faint_bg_color)),
-                    )
+                    .frame(frame)
                     .show(ctx, |ui| {
                         ui.vertical(|ui| {
                             // If a general prediction is pending: show only spinner + text for general predictions.
