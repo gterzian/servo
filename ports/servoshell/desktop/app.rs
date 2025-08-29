@@ -197,7 +197,6 @@ impl App {
             self.servoshell_preferences.clone(),
             webdriver_receiver,
         ));
-        running_state.create_and_focus_toplevel_webview(self.initial_url.clone().into_url());
         if let Some(ref mut minibrowser) = self.minibrowser {
             minibrowser.update(window.as_ref(), &running_state, "init");
         }
@@ -321,13 +320,17 @@ impl App {
                         focused_webview.reload();
                     }
                 },
-                MinibrowserEvent::NewWebView => {
+                MinibrowserEvent::NewMiniApp => {
                     minibrowser.update_location_dirty(false);
-                    state.create_and_focus_toplevel_webview(Url::parse("servo:newtab").unwrap());
+                    state.start_mini_app_installation();
                 },
                 MinibrowserEvent::CloseWebView(id) => {
                     minibrowser.update_location_dirty(false);
                     state.close_webview(id);
+                },
+                MinibrowserEvent::UninstallMiniApp(id) => {
+                    minibrowser.update_location_dirty(false);
+                    state.uninstall_mini_app(id);
                 },
             }
         }
@@ -743,6 +746,11 @@ impl ApplicationHandler<AppEvent> for App {
 
         // Consume and handle any events from the servoshell UI.
         self.handle_servoshell_ui_events();
+
+        // Check for completed folder picker and process mini-app installation
+        if let AppState::Running(state) = &self.state {
+            state.check_and_process_folder_picker();
+        }
 
         self.handle_events_with_winit(event_loop, window);
     }

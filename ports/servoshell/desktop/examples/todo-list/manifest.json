@@ -1,0 +1,6 @@
+{
+  "title": "Todo List",
+  "application": "app.js",
+  "description": "A simple todo list application for managing tasks",
+  "version": "1.0.0"
+}

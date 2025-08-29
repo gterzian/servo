@@ -2,7 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
 
 use egui::Modal;
@@ -23,6 +25,10 @@ pub enum Dialog {
         dialog: EguiFileDialog,
         multiple: bool,
         response_sender: IpcSender<Option<Vec<PathBuf>>>,
+    },
+    Folder {
+        dialog: EguiFileDialog,
+        result_ref: Rc<RefCell<Option<PathBuf>>>,
     },
     #[allow(clippy::enum_variant_names, reason = "spec terminology")]
     SimpleDialog(SimpleDialog),
@@ -79,6 +85,21 @@ impl Dialog {
             multiple,
             response_sender,
         }
+    }
+
+    pub fn new_folder_dialog(result_ref: Rc<RefCell<Option<PathBuf>>>) -> Self {
+        let mut dialog = EguiFileDialog::new();
+
+        // Set the initial directory to the examples folder
+        let examples_path = std::path::Path::new("ports/servoshell/desktop/examples");
+        if examples_path.exists() {
+            dialog = dialog.initial_directory(examples_path.to_path_buf());
+        }
+
+        // Center the dialog on screen
+        dialog = dialog.anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO);
+
+        Dialog::Folder { dialog, result_ref }
     }
 
     pub fn new_simple_dialog(dialog: SimpleDialog) -> Self {
@@ -212,6 +233,23 @@ impl Dialog {
                         false
                     },
                     DialogState::Closed => false,
+                }
+            },
+            Dialog::Folder { dialog, result_ref } => {
+                if dialog.state() == DialogState::Closed {
+                    dialog.pick_directory();
+                }
+
+                let state = dialog.update(ctx).state();
+                match state {
+                    DialogState::Open => true,
+                    DialogState::Picked(path) => {
+                        // For folder selection, use the path directly since it should be a directory
+                        *result_ref.borrow_mut() = Some(path);
+                        false
+                    },
+                    DialogState::Cancelled | DialogState::Closed => false,
+                    _ => true,
                 }
             },
             Dialog::SimpleDialog(SimpleDialog::Alert {

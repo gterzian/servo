@@ -9,15 +9,16 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use dpi::PhysicalSize;
-use egui::text::{CCursor, CCursorRange};
-use egui::text_edit::TextEditState;
+use egui::collapsing_header::CollapsingState;
 use egui::{
-    Button, CentralPanel, Frame, Key, Label, Modifiers, PaintCallback, TopBottomPanel, Vec2, pos2,
+    Align, Area, Button, CentralPanel, Color32, FontId, Frame, Key, Label, Modifiers, Order,
+    PaintCallback, Pos2, Rect, Response, RichText, Rounding, ScrollArea, Sense, SidePanel,
+    TextStyle, TopBottomPanel, Ui, Vec2, ViewportCommand, pos2,
 };
 use egui_glow::CallbackFn;
 use egui_winit::EventResponse;
-use euclid::{Box2D, Length, Point2D, Rect, Scale, Size2D};
-use log::{trace, warn};
+use euclid::{Box2D, Length, Point2D, Scale, Size2D};
+use log::trace;
 use servo::base::id::WebViewId;
 use servo::servo_geometry::DeviceIndependentPixel;
 use servo::servo_url::ServoUrl;
@@ -39,6 +40,7 @@ pub struct Minibrowser {
     pub context: EguiGlow,
     pub event_queue: RefCell<Vec<MinibrowserEvent>>,
     pub toolbar_height: Length<f32, DeviceIndependentPixel>,
+    pub tabs_width: Length<f32, DeviceIndependentPixel>,
 
     last_update: Instant,
     last_mouse_position: Option<Point2D<f32, DeviceIndependentPixel>>,
@@ -63,8 +65,9 @@ pub enum MinibrowserEvent {
     Back,
     Forward,
     Reload,
-    NewWebView,
+    NewMiniApp,
     CloseWebView(WebViewId),
+    UninstallMiniApp(WebViewId),
 }
 
 fn truncate_with_ellipsis(input: &str, max_length: usize) -> String {
@@ -111,6 +114,7 @@ impl Minibrowser {
             context,
             event_queue: RefCell::new(vec![]),
             toolbar_height: Default::default(),
+            tabs_width: Length::new(160.0),
             last_update: Instant::now(),
             last_mouse_position: None,
             location: RefCell::new(initial_url.to_string()),
@@ -186,7 +190,7 @@ impl Minibrowser {
     fn toolbar_button(text: &str) -> egui::Button<'_> {
         egui::Button::new(text)
             .frame(false)
-            .min_size(Vec2 { x: 20.0, y: 20.0 })
+            .min_size(Vec2 { x: 32.0, y: 32.0 })
     }
 
     /// Draws a browser tab, checking for clicks and queues appropriate `MinibrowserEvent`s.
@@ -209,54 +213,62 @@ impl Minibrowser {
         let selected = webview.focused();
 
         // Setup a tab frame that will contain the favicon, title and close button
-        let mut tab_frame = egui::Frame::NONE.corner_radius(4).begin(ui);
+        let mut tab_frame = egui::Frame::NONE
+            .corner_radius(6.0)
+            .inner_margin(egui::Margin::symmetric(8, 6))
+            .begin(ui);
         {
-            tab_frame.content_ui.add_space(5.0);
+            tab_frame.content_ui.horizontal(|ui| {
+                let visuals = ui.visuals_mut();
+                // Remove the stroke so we don't see the border between the close button and the label
+                visuals.widgets.active.bg_stroke.width = 0.0;
+                visuals.widgets.hovered.bg_stroke.width = 0.0;
+                // Now we make sure the fill color is always the same, irrespective of state, that way
+                // we can make sure that both the label and close button have the same background color
+                visuals.widgets.noninteractive.weak_bg_fill = inactive_bg_color;
+                visuals.widgets.inactive.weak_bg_fill = inactive_bg_color;
+                visuals.widgets.hovered.weak_bg_fill = active_bg_color;
+                visuals.widgets.active.weak_bg_fill = active_bg_color;
+                visuals.selection.bg_fill = active_bg_color;
+                visuals.selection.stroke.color = visuals.widgets.active.fg_stroke.color;
+                visuals.widgets.hovered.fg_stroke.color = visuals.widgets.active.fg_stroke.color;
 
-            let visuals = tab_frame.content_ui.visuals_mut();
-            // Remove the stroke so we don't see the border between the close button and the label
-            visuals.widgets.active.bg_stroke.width = 0.0;
-            visuals.widgets.hovered.bg_stroke.width = 0.0;
-            // Now we make sure the fill color is always the same, irrespective of state, that way
-            // we can make sure that both the label and close button have the same background color
-            visuals.widgets.noninteractive.weak_bg_fill = inactive_bg_color;
-            visuals.widgets.inactive.weak_bg_fill = inactive_bg_color;
-            visuals.widgets.hovered.weak_bg_fill = active_bg_color;
-            visuals.widgets.active.weak_bg_fill = active_bg_color;
-            visuals.selection.bg_fill = active_bg_color;
-            visuals.selection.stroke.color = visuals.widgets.active.fg_stroke.color;
-            visuals.widgets.hovered.fg_stroke.color = visuals.widgets.active.fg_stroke.color;
+                // Expansion would also show that they are 2 separate widgets
+                visuals.widgets.active.expansion = 0.0;
+                visuals.widgets.hovered.expansion = 0.0;
 
-            // Expansion would also show that they are 2 separate widgets
-            visuals.widgets.active.expansion = 0.0;
-            visuals.widgets.hovered.expansion = 0.0;
+                if let Some(favicon) = favicon_texture {
+                    ui.add(
+                        egui::Image::from_texture(favicon)
+                            .fit_to_exact_size(egui::vec2(16.0, 16.0))
+                            .bg_fill(egui::Color32::TRANSPARENT),
+                    );
+                }
 
-            if let Some(favicon) = favicon_texture {
-                tab_frame.content_ui.add(
-                    egui::Image::from_texture(favicon)
-                        .fit_to_exact_size(egui::vec2(16.0, 16.0))
-                        .bg_fill(egui::Color32::TRANSPARENT),
+                let tab = ui
+                    .add(Button::selectable(
+                        selected,
+                        truncate_with_ellipsis(&label, 20),
+                    ))
+                    .on_hover_ui(|ui| {
+                        ui.label(&label);
+                    });
+
+                if !selected && tab.clicked() {
+                    webview.focus();
+                }
+
+                // Add close button (x) for mini-app uninstall
+                let close_button = ui.add(
+                    Button::new("×")
+                        .frame(false)
+                        .min_size(egui::Vec2::splat(16.0)),
                 );
-            }
 
-            let tab = tab_frame
-                .content_ui
-                .add(Button::selectable(
-                    selected,
-                    truncate_with_ellipsis(&label, 20),
-                ))
-                .on_hover_ui(|ui| {
-                    ui.label(&label);
-                });
-
-            let close_button = tab_frame
-                .content_ui
-                .add(egui::Button::new("X").fill(egui::Color32::TRANSPARENT));
-            if close_button.clicked() || close_button.middle_clicked() || tab.middle_clicked() {
-                event_queue.push(MinibrowserEvent::CloseWebView(webview.id()))
-            } else if !selected && tab.clicked() {
-                webview.focus();
-            }
+                if close_button.clicked() {
+                    event_queue.push(MinibrowserEvent::UninstallMiniApp(webview.id()));
+                }
+            });
         }
 
         let response = tab_frame.allocate_space(ui);
@@ -300,98 +312,15 @@ impl Minibrowser {
         let _duration = context.run(winit_window, |ctx| {
             load_pending_favicons(ctx, state, favicon_textures);
 
-            // TODO: While in fullscreen add some way to mitigate the increased phishing risk
-            // when not displaying the URL bar: https://github.com/servo/servo/issues/32443
-            if winit_window.fullscreen().is_none() {
-                let frame = egui::Frame::default()
-                    .fill(ctx.style().visuals.window_fill)
-                    .inner_margin(4.0);
-                TopBottomPanel::top("toolbar").frame(frame).show(ctx, |ui| {
-                    ui.allocate_ui_with_layout(
-                        ui.available_size(),
-                        egui::Layout::left_to_right(egui::Align::Center),
-                        |ui| {
-                            if ui.add(Minibrowser::toolbar_button("⏴")).clicked() {
-                                event_queue.borrow_mut().push(MinibrowserEvent::Back);
-                            }
-                            if ui.add(Minibrowser::toolbar_button("⏵")).clicked() {
-                                event_queue.borrow_mut().push(MinibrowserEvent::Forward);
-                            }
+            TopBottomPanel::top("tabs")
+                .min_height(45.0)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    ui.add_space(8.0); // Top padding
+                    ui.horizontal(|ui| {
+                        ui.add_space(12.0); // Left padding
+                        ui.spacing_mut().item_spacing.x = 8.0; // More space between tabs
 
-                            match self.load_status {
-                                LoadStatus::Started | LoadStatus::HeadParsed => {
-                                    if ui.add(Minibrowser::toolbar_button("X")).clicked() {
-                                        warn!("Do not support stop yet.");
-                                    }
-                                },
-                                LoadStatus::Complete => {
-                                    if ui.add(Minibrowser::toolbar_button("↻")).clicked() {
-                                        event_queue.borrow_mut().push(MinibrowserEvent::Reload);
-                                    }
-                                },
-                            }
-                            ui.add_space(2.0);
-
-                            ui.allocate_ui_with_layout(
-                                ui.available_size(),
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    let location_id = egui::Id::new("location_input");
-                                    let location_field = ui.add_sized(
-                                        ui.available_size(),
-                                        egui::TextEdit::singleline(&mut *location.borrow_mut())
-                                            .id(location_id),
-                                    );
-
-                                    if location_field.changed() {
-                                        location_dirty.set(true);
-                                    }
-                                    // Handle adddress bar shortcut.
-                                    if ui.input(|i| {
-                                        if cfg!(target_os = "macos") {
-                                            i.clone().consume_key(Modifiers::COMMAND, Key::L)
-                                        } else {
-                                            i.clone().consume_key(Modifiers::COMMAND, Key::L) ||
-                                                i.clone().consume_key(Modifiers::ALT, Key::D)
-                                        }
-                                    }) {
-                                        // The focus request immediately makes gained_focus return true.
-                                        location_field.request_focus();
-                                    }
-                                    // Select address bar text when it's focused (click or shortcut).
-                                    if location_field.gained_focus() {
-                                        if let Some(mut state) =
-                                            TextEditState::load(ui.ctx(), location_id)
-                                        {
-                                            // Select the whole input.
-                                            state.cursor.set_char_range(Some(CCursorRange::two(
-                                                CCursor::new(0),
-                                                CCursor::new(location.borrow().len()),
-                                            )));
-                                            state.store(ui.ctx(), location_id);
-                                        }
-                                    }
-                                    // Navigate to address when enter is pressed in the address bar.
-                                    if location_field.lost_focus() &&
-                                        ui.input(|i| i.clone().key_pressed(Key::Enter))
-                                    {
-                                        event_queue
-                                            .borrow_mut()
-                                            .push(MinibrowserEvent::Go(location.borrow().clone()));
-                                    }
-                                },
-                            );
-                        },
-                    );
-                });
-            };
-
-            // A simple Tab header strip
-            TopBottomPanel::top("tabs").show(ctx, |ui| {
-                ui.allocate_ui_with_layout(
-                    ui.available_size(),
-                    egui::Layout::left_to_right(egui::Align::Center),
-                    |ui| {
                         for (id, webview) in state.webviews().into_iter() {
                             let favicon = favicon_textures
                                 .get(&id)
@@ -399,12 +328,26 @@ impl Minibrowser {
                                 .copied();
                             Self::browser_tab(ui, webview, &mut event_queue.borrow_mut(), favicon);
                         }
-                        if ui.add(Minibrowser::toolbar_button("+")).clicked() {
-                            event_queue.borrow_mut().push(MinibrowserEvent::NewWebView);
+
+                        // Add flexible space before the install button
+                        ui.add_space(20.0);
+
+                        // Show "+" button when not installing mini-app
+                        if !state.is_mini_app_installation_pending() {
+                            let install_btn = ui.add(
+                                Button::new("+ install mini-app")
+                                    .frame(true)
+                                    .min_size(egui::Vec2::new(120.0, 28.0)),
+                            );
+                            if install_btn.clicked() {
+                                event_queue.borrow_mut().push(MinibrowserEvent::NewMiniApp);
+                            }
                         }
-                    },
-                );
-            });
+
+                        ui.add_space(12.0); // Right padding
+                    });
+                    ui.add_space(4.0); // Bottom padding
+                });
 
             // The toolbar height is where the Context’s available rect starts.
             // For reasons that are unclear, the TopBottomPanel’s ui cursor exceeds this by one egui
@@ -459,9 +402,9 @@ impl Minibrowser {
                         rect,
                         callback: Arc::new(CallbackFn::new(move |info, painter| {
                             let clip = info.viewport_in_pixels();
-                            let rect_in_parent = Rect::new(
-                                Point2D::new(clip.left_px, clip.from_bottom_px),
-                                Size2D::new(clip.width_px, clip.height_px),
+                            let rect_in_parent = euclid::Rect::new(
+                                euclid::Point2D::new(clip.left_px, clip.from_bottom_px),
+                                euclid::Size2D::new(clip.width_px, clip.height_px),
                             );
                             render_to_parent(painter.gl(), rect_in_parent)
                         })),

@@ -5,9 +5,9 @@
 use std::cell::{Ref, RefCell, RefMut};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::mem;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::{fs, mem};
 
 use crossbeam_channel::Receiver;
 use embedder_traits::webdriver::WebDriverSenders;
@@ -42,6 +42,17 @@ pub(crate) enum AppState {
     ShuttingDown,
 }
 
+/// A local mini-app loaded from a folder (manifest + JS), rendered in a WebView.
+pub struct MiniApp {
+    pub title: String,
+    /// Path to the JS application file
+    pub application: PathBuf,
+    /// Path to the generated HTML page stored in /tmp/servo
+    pub html_page: PathBuf,
+    /// The underlying WebView rendering the mini-app
+    pub webview: WebView,
+}
+
 pub(crate) struct RunningAppState {
     /// A handle to the Servo instance of the [`RunningAppState`]. This is not stored inside
     /// `inner` so that we can keep a reference to Servo in order to spin the event loop,
@@ -58,10 +69,8 @@ pub(crate) struct RunningAppState {
 }
 
 pub struct RunningAppStateInner {
-    /// List of top-level browsing contexts.
-    /// Modified by EmbedderMsg::WebViewOpened and EmbedderMsg::WebViewClosed,
-    /// and we exit if it ever becomes empty.
-    webviews: HashMap<WebViewId, WebView>,
+    /// Mini-apps keyed by their WebViewId.
+    mini_apps: HashMap<WebViewId, MiniApp>,
 
     /// The order in which the webviews were created.
     creation_order: Vec<WebViewId>,
@@ -72,6 +81,9 @@ pub struct RunningAppStateInner {
 
     /// The current set of open dialogs.
     dialogs: HashMap<WebViewId, Vec<Dialog>>,
+
+    /// Global dialogs not associated with any specific webview
+    global_dialogs: Vec<Dialog>,
 
     /// A handle to the Window that Servo is rendering in -- either headed or headless.
     window: Rc<dyn WindowPortsMethods>,
@@ -89,6 +101,15 @@ pub struct RunningAppStateInner {
     /// List of webviews that have favicon textures which are not yet uploaded
     /// to the GPU by egui.
     pending_favicon_loads: Vec<WebViewId>,
+
+    /// Shared result from folder picker for mini-app installation
+    folder_picker_result: Rc<RefCell<Option<PathBuf>>>,
+
+    /// Whether a mini-app installation is in progress
+    mini_app_installation_pending: bool,
+
+    /// Whether the folder picker dialog is currently open
+    folder_dialog_open: bool,
 }
 
 impl Drop for RunningAppState {
@@ -111,15 +132,19 @@ impl RunningAppState {
             webdriver_receiver,
             webdriver_senders: RefCell::default(),
             inner: RefCell::new(RunningAppStateInner {
-                webviews: HashMap::default(),
+                mini_apps: HashMap::default(),
                 creation_order: Default::default(),
                 focused_webview_id: None,
                 dialogs: Default::default(),
+                global_dialogs: Default::default(),
                 window,
                 gamepad_support: GamepadSupport::maybe_new(),
                 need_update: false,
                 need_repaint: false,
                 pending_favicon_loads: Default::default(),
+                folder_picker_result: Rc::new(RefCell::new(None)),
+                mini_app_installation_pending: false,
+                folder_dialog_open: false,
             }),
         }
     }
@@ -133,11 +158,11 @@ impl RunningAppState {
         let webview = WebViewBuilder::new(self.servo())
             .url(url)
             .hidpi_scale_factor(self.inner().window.hidpi_scale_factor())
-            .delegate(self.clone())
+            .delegate(self.clone() as Rc<dyn WebViewDelegate>)
             .build();
 
         webview.notify_theme_change(self.inner().window.theme());
-        self.add(webview.clone());
+        // TODO: Add webview tracking for traditional web browsing
         webview
     }
 
@@ -160,8 +185,48 @@ impl RunningAppState {
     pub(crate) fn hidpi_scale_factor_changed(&self) {
         let inner = self.inner();
         let new_scale_factor = inner.window.hidpi_scale_factor();
-        for webview in inner.webviews.values() {
-            webview.set_hidpi_scale_factor(new_scale_factor);
+        for mini_app in inner.mini_apps.values() {
+            mini_app.webview.set_hidpi_scale_factor(new_scale_factor);
+        }
+    }
+
+    /// Check if a mini-app installation is pending
+    pub(crate) fn is_mini_app_installation_pending(&self) -> bool {
+        self.inner().mini_app_installation_pending
+    }
+
+    /// Start mini-app installation process
+    pub(crate) fn start_mini_app_installation(&self) {
+        self.inner_mut().mini_app_installation_pending = true;
+        self.inner_mut().folder_dialog_open = true;
+
+        // Show folder picker dialog as a global dialog (not associated with any webview)
+        let folder_dialog = Dialog::new_folder_dialog(self.inner().folder_picker_result.clone());
+        self.add_global_dialog(folder_dialog);
+    }
+
+    /// Check if folder picker has a result and process it
+    pub(crate) fn check_and_process_folder_picker(self: &Rc<Self>) -> Option<Result<(), String>> {
+        let result_ref = self.inner().folder_picker_result.clone();
+        let mut result = result_ref.borrow_mut();
+
+        if let Some(folder_path) = result.take() {
+            // Dialog is closed, now we're processing
+            self.inner_mut().folder_dialog_open = false;
+
+            // Keep mini_app_installation_pending = true during processing
+            // It will be set to false after the mini-app is successfully created
+            let processing_result = self.create_mini_app_from_folder(folder_path);
+
+            // Now set it to false after processing completes (success or failure)
+            self.inner_mut().mini_app_installation_pending = false;
+
+            // Trigger UI update to ensure the new mini-app appears
+            self.inner_mut().need_update = true;
+
+            Some(processing_result)
+        } else {
+            None
         }
     }
 
@@ -219,28 +284,56 @@ impl RunningAppState {
         }
     }
 
-    pub(crate) fn add(&self, webview: WebView) {
-        self.inner_mut().creation_order.push(webview.id());
-        self.inner_mut().webviews.insert(webview.id(), webview);
+    pub(crate) fn add_mini_app(&self, mini_app: MiniApp) {
+        let id = mini_app.webview.id();
+        self.inner_mut().creation_order.push(id);
+        self.inner_mut().mini_apps.insert(id, mini_app);
     }
 
     pub(crate) fn shutdown(&self) {
-        self.inner_mut().webviews.clear();
+        self.inner_mut().mini_apps.clear();
     }
 
     pub(crate) fn for_each_active_dialog(&self, callback: impl Fn(&mut Dialog) -> bool) {
+        // Get the focused webview ID first, before borrowing mutably
+        let focused_webview_id = self.inner().focused_webview_id;
         let last_created_webview_id = self.inner().creation_order.last().cloned();
-        let Some(webview_id) = self
-            .focused_webview()
-            .as_ref()
-            .map(WebView::id)
-            .or(last_created_webview_id)
-        else {
-            return;
-        };
+        let initial_pending_state = self.inner().mini_app_installation_pending;
 
-        if let Some(dialogs) = self.inner_mut().dialogs.get_mut(&webview_id) {
-            dialogs.retain_mut(callback);
+        // Now get mutable borrow
+        let mut inner_mut = self.inner_mut();
+        let mut folder_dialog_removed = false;
+
+        // First handle global dialogs (not associated with any webview)
+        inner_mut.global_dialogs.retain_mut(|dialog| {
+            let is_folder_dialog = matches!(dialog, Dialog::Folder { .. });
+            let keep = callback(dialog);
+            if !keep && is_folder_dialog && initial_pending_state {
+                folder_dialog_removed = true;
+            }
+            keep
+        });
+
+        // Then handle webview-specific dialogs
+        let webview_id = focused_webview_id.or(last_created_webview_id);
+
+        if let Some(webview_id) = webview_id {
+            if let Some(dialogs) = inner_mut.dialogs.get_mut(&webview_id) {
+                dialogs.retain_mut(|dialog| {
+                    let is_folder_dialog = matches!(dialog, Dialog::Folder { .. });
+                    let keep = callback(dialog);
+                    if !keep && is_folder_dialog && initial_pending_state {
+                        folder_dialog_removed = true;
+                    }
+                    keep
+                });
+            }
+        }
+
+        // Reset the pending state if a folder dialog was removed
+        if folder_dialog_removed {
+            inner_mut.mini_app_installation_pending = false;
+            inner_mut.folder_dialog_open = false;
         }
     }
 
@@ -248,11 +341,19 @@ impl RunningAppState {
         // This can happen because we can trigger a close with a UI action and then get the
         // close event from Servo later.
         let mut inner = self.inner_mut();
-        if !inner.webviews.contains_key(&webview_id) {
+        if !inner.mini_apps.contains_key(&webview_id) {
             return;
         }
 
-        inner.webviews.retain(|&id, _| id != webview_id);
+        // Clean up the generated HTML file if it exists
+        if let Some(mini_app) = inner.mini_apps.get(&webview_id) {
+            if let Err(e) = std::fs::remove_file(&mini_app.html_page) {
+                // Log but don't fail if file removal fails (file might not exist)
+                log::warn!("Failed to remove HTML file {:?}: {}", mini_app.html_page, e);
+            }
+        }
+
+        inner.mini_apps.retain(|&id, _| id != webview_id);
         inner.creation_order.retain(|&id| id != webview_id);
         inner.dialogs.remove(&webview_id);
         if Some(webview_id) == inner.focused_webview_id {
@@ -262,7 +363,7 @@ impl RunningAppState {
         let last_created = inner
             .creation_order
             .last()
-            .and_then(|id| inner.webviews.get(id));
+            .and_then(|id| inner.mini_apps.get(id).map(|m| &m.webview));
 
         match last_created {
             Some(last_created_webview) => {
@@ -276,12 +377,51 @@ impl RunningAppState {
                 // https://github.com/servo/servo/issues/37408
             },
         }
+
+        // Trigger UI update to refresh the tab list
+        drop(inner);
+        self.inner_mut().need_update = true;
+    }
+
+    pub fn uninstall_mini_app(&self, webview_id: WebViewId) {
+        let mut inner = self.inner_mut();
+        if !inner.mini_apps.contains_key(&webview_id) {
+            return;
+        }
+
+        // Clean up the generated HTML file if it exists
+        if let Some(mini_app) = inner.mini_apps.get(&webview_id) {
+            if let Err(e) = std::fs::remove_file(&mini_app.html_page) {
+                // Log but don't fail if file removal fails (file might not exist)
+                log::warn!("Failed to remove HTML file {:?}: {}", mini_app.html_page, e);
+            }
+        }
+
+        inner.mini_apps.retain(|&id, _| id != webview_id);
+        inner.creation_order.retain(|&id| id != webview_id);
+        inner.dialogs.remove(&webview_id);
+        if Some(webview_id) == inner.focused_webview_id {
+            inner.focused_webview_id = None;
+        }
+
+        let last_created = inner
+            .creation_order
+            .last()
+            .and_then(|id| inner.mini_apps.get(id).map(|m| &m.webview));
+
+        // Focus the last created mini-app if any remain, but don't shutdown
+        if let Some(last_created_webview) = last_created {
+            last_created_webview.focus();
+        }
+
+        // Trigger UI update to ensure tab disappears immediately
+        inner.need_update = true;
     }
 
     pub fn focused_webview(&self) -> Option<WebView> {
         self.inner()
             .focused_webview_id
-            .and_then(|id| self.inner().webviews.get(&id).cloned())
+            .and_then(|id| self.inner().mini_apps.get(&id).map(|m| m.webview.clone()))
     }
 
     // Returns the webviews in the creation order.
@@ -290,12 +430,89 @@ impl RunningAppState {
         inner
             .creation_order
             .iter()
-            .map(|id| (*id, inner.webviews.get(id).unwrap().clone()))
+            .map(|id| {
+                let mini_app = inner.mini_apps.get(id).unwrap();
+                (*id, mini_app.webview.clone())
+            })
             .collect()
     }
 
     pub fn webview_by_id(&self, id: WebViewId) -> Option<WebView> {
-        self.inner().webviews.get(&id).cloned()
+        self.inner().mini_apps.get(&id).map(|m| m.webview.clone())
+    }
+
+    /// Create a mini-app from a folder containing manifest.json and JS file
+    fn create_mini_app_from_folder(self: &Rc<Self>, folder: PathBuf) -> Result<(), String> {
+        // 1) Read and parse manifest.json
+        let manifest_path = folder.join("manifest.json");
+        let manifest_str = fs::read_to_string(&manifest_path)
+            .map_err(|e| format!("Failed to read manifest.json: {}", e))?;
+        let manifest_val: serde_json::Value = serde_json::from_str(&manifest_str)
+            .map_err(|e| format!("Invalid manifest.json: {}", e))?;
+        let title = manifest_val
+            .get("title")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "manifest.json missing 'title' string".to_string())?
+            .to_owned();
+        let application_name = manifest_val
+            .get("application")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "manifest.json missing 'application' string".to_string())?
+            .to_owned();
+
+        // Check if this mini-app is already installed by comparing the JS application path
+        let js_path = folder.join(&application_name);
+        for mini_app in self.inner().mini_apps.values() {
+            if mini_app.application == js_path {
+                // Mini-app already installed, do nothing
+                return Ok(());
+            }
+        }
+
+        // 2) Load JS application content
+        let js_code = fs::read_to_string(&js_path).map_err(|e| {
+            format!(
+                "Failed to read JS application '{}': {}",
+                application_name, e
+            )
+        })?;
+
+        // 3) Generate HTML
+        let html = format!(
+            "<!doctype html><html><head><meta charset=\"utf-8\"><title>{title}</title></head><body><script>document.addEventListener('DOMContentLoaded', function() {{ {code} }});</script></body></html>",
+            title = title,
+            code = js_code,
+        );
+
+        // 4) Write to /tmp/servo
+        let out_dir = Path::new("/tmp/servo");
+        fs::create_dir_all(out_dir).map_err(|e| format!("Failed to create /tmp/servo: {}", e))?;
+        let safe_title = title
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect::<String>();
+        let html_path = out_dir.join(format!("{}.html", safe_title));
+        fs::write(&html_path, html).map_err(|e| format!("Failed to write HTML page: {}", e))?;
+
+        // 5) Create a WebView to load the file:// URL and register the MiniApp
+        let url = url::Url::from_file_path(&html_path)
+            .map_err(|_| "Failed to form file URL".to_string())?;
+
+        // Create webview using the same pattern as create_and_focus_toplevel_webview
+        let webview = self.create_toplevel_webview(url);
+
+        let mini_app = MiniApp {
+            title,
+            application: js_path,
+            html_page: html_path,
+            webview: webview.clone(),
+        };
+        self.add_mini_app(mini_app);
+
+        // Focus the newly created mini-app
+        webview.focus_and_raise_to_top(true);
+
+        Ok(())
     }
 
     pub fn handle_gamepad_events(&self) {
@@ -323,8 +540,21 @@ impl RunningAppState {
         inner_mut.need_update = true;
     }
 
+    fn add_global_dialog(&self, dialog: Dialog) {
+        let mut inner_mut = self.inner_mut();
+        inner_mut.global_dialogs.push(dialog);
+    }
+
     pub(crate) fn has_active_dialog(&self) -> bool {
-        let last_created_webview_id = self.inner().creation_order.last().cloned();
+        let inner = self.inner();
+
+        // Check for global dialogs first
+        if !inner.global_dialogs.is_empty() {
+            return true;
+        }
+
+        // Then check webview-specific dialogs
+        let last_created_webview_id = inner.creation_order.last().cloned();
         let Some(webview_id) = self
             .focused_webview()
             .as_ref()
@@ -334,7 +564,6 @@ impl RunningAppState {
             return false;
         };
 
-        let inner = self.inner();
         inner
             .dialogs
             .get(&webview_id)
@@ -552,7 +781,7 @@ impl WebViewDelegate for RunningAppState {
 
     fn notify_page_title_changed(&self, webview: servo::WebView, title: Option<String>) {
         if webview.focused() {
-            let window_title = format!("{} - Servo", title.clone().unwrap_or_default());
+            let window_title = format!("{}", title.clone().unwrap_or_default());
             self.inner().window.set_title(&window_title);
             self.inner_mut().need_update = true;
         }
@@ -646,7 +875,7 @@ impl WebViewDelegate for RunningAppState {
         if self.servoshell_preferences.webdriver_port.is_none() {
             webview.focus_and_raise_to_top(true);
         }
-        self.add(webview.clone());
+        // TODO: Add webview tracking for window.open() webviews
         Some(webview)
     }
 
@@ -668,8 +897,15 @@ impl WebViewDelegate for RunningAppState {
             webview.show(true);
             inner_mut.need_update = true;
             inner_mut.focused_webview_id = Some(webview.id());
+
+            // Update window title to the focused mini-app's title
+            if let Some(mini_app) = inner_mut.mini_apps.get(&webview.id()) {
+                inner_mut.window.set_title(&mini_app.title);
+            }
         } else if inner_mut.focused_webview_id == Some(webview.id()) {
             inner_mut.focused_webview_id = None;
+            // Clear title when no mini-app is focused
+            inner_mut.window.set_title("Servo");
         }
     }
 

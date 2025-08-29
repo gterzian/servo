@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notes App</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 20px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            background-color: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .note-form {
+            display: block;
+            margin-bottom: 30px;
+            padding: 20px;
+            background-color: #f9f9f9;
+            border-radius: 6px;
+            border: 1px solid #ddd;
+        }
+        
+        .form-group {
+            display: block;
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        
+        textarea {
+            display: block;
+            width: 100%;
+            min-height: 80px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+            font-family: Arial, sans-serif;
+            resize: vertical;
+            box-sizing: border-box;
+        }
+        
+        textarea:focus {
+            outline: none;
+            border-color: #007bff;
+            box-shadow: 0 0 5px rgba(0,123,255,0.3);
+        }
+        
+        .add-button {
+            display: block;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        
+        .add-button:hover {
+            background-color: #0056b3;
+        }
+        
+        .add-button:active {
+            background-color: #004085;
+        }
+        
+        .notes-list {
+            display: block;
+        }
+        
+        .note-item {
+            display: block;
+            background-color: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            padding: 15px;
+            margin-bottom: 15px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        .note-content {
+            display: block;
+            color: #333;
+            line-height: 1.5;
+            margin-bottom: 10px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        .note-timestamp {
+            display: block;
+            color: #666;
+            font-size: 12px;
+            text-align: right;
+        }
+        
+        .clear-button {
+            display: block;
+            background-color: #dc3545;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-size: 14px;
+            cursor: pointer;
+            margin-top: 20px;
+        }
+        
+        .clear-button:hover {
+            background-color: #c82333;
+        }
+        
+        .empty-state {
+            display: block;
+            text-align: center;
+            color: #666;
+            font-style: italic;
+            padding: 40px 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📝 Notes App</h1>
+        
+        <div class="note-form">
+            <div class="form-group">
+                <label for="noteText">Add a new note:</label>
+                <textarea id="noteText" placeholder="Type your note here..."></textarea>
+            </div>
+            <button id="addButton" class="add-button">Add Note</button>
+        </div>
+        
+        <div class="notes-list" id="notesList">
+            <div class="empty-state" id="emptyState">
+                No notes yet. Add your first note above!
+            </div>
+        </div>
+        
+        <button id="clearButton" class="clear-button" style="display: none;">Clear All Notes</button>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+{
+  "title": "Notes App",
+  "application": "app.js",
+  "description": "A simple note-taking app with reverse chronological order",
+  "version": "1.0.0"
+}

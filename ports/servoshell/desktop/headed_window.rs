@@ -604,6 +604,12 @@ impl WindowPortsMethods for Window {
     }
 
     fn handle_winit_event(&self, state: Rc<RunningAppState>, event: WindowEvent) {
+        // Handle close request even without a focused webview
+        if matches!(event, WindowEvent::CloseRequested) {
+            state.servo().start_shutting_down();
+            return;
+        }
+
         let Some(webview) = state.focused_webview() else {
             return;
         };
@@ -688,9 +694,6 @@ impl WindowPortsMethods for Window {
             },
             WindowEvent::PinchGesture { delta, .. } => {
                 webview.set_pinch_zoom(delta as f32 + 1.0);
-            },
-            WindowEvent::CloseRequested => {
-                state.servo().start_shutting_down();
             },
             WindowEvent::ThemeChanged(theme) => {
                 webview.notify_theme_change(match theme {

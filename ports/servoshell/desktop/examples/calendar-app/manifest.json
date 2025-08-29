@@ -1,0 +1,6 @@
+{
+  "title": "Calendar App",
+  "application": "app.js",
+  "description": "A simple calendar app for viewing dates and adding events",
+  "version": "1.0.0"
+}
