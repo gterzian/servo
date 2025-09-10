@@ -1,0 +1,6 @@
+{
+    "title": "Tic-Tac-Toe Game",
+    "application": "app.js",
+    "description": "Classic tic-tac-toe game for two players",
+    "version": "1.0.0"
+}
