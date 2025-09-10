@@ -304,7 +304,7 @@ impl OllamaWorker {
             models: {
                 let mut m = HashMap::new();
                 m.insert(Model::Low, "gemma3:1b".to_string());
-                m.insert(Model::High, "gemma3n:e2b".to_string());
+                m.insert(Model::High, "gemma3:4b".to_string());
                 m
             },
             pending_url_input: None,
