@@ -22,20 +22,17 @@ const URL_INPUT_DEBOUNCE_TIMEOUT: Duration = Duration::from_millis(500);
 
 struct PromptTemplates {
     browser_action: String,
-    url_prediction_general: String,
-    url_prediction_with_anchors: String,
+    url_prediction: String,
 }
 
 impl PromptTemplates {
     fn load() -> Self {
         let browser_action = Self::load_prompt("browser_action.md");
-        let url_prediction_general = Self::load_prompt("url_prediction.md");
-        let url_prediction_with_anchors = Self::load_prompt("url_prediction_with_anchors.md");
+        let url_prediction = Self::load_prompt("url_prediction.md");
 
         Self {
             browser_action,
-            url_prediction_general,
-            url_prediction_with_anchors,
+            url_prediction,
         }
     }
 
@@ -52,21 +49,10 @@ impl PromptTemplates {
         self.browser_action.replace("{user_input}", user_input)
     }
 
-    fn format_url_prediction_general(&self, user_input: &str) -> String {
-        self.url_prediction_general
-            .replace("{user_input}", user_input)
-    }
-
-    fn format_url_prediction_with_anchors(
-        &self,
-        user_input: &str,
-        current_url: &str,
-        anchor_urls: &[ServoUrl],
-    ) -> String {
+    fn format_url_prediction(&self, user_input: &str, anchor_urls: &[ServoUrl]) -> String {
         let anchor_urls_formatted = Self::format_anchor_urls(anchor_urls);
-        self.url_prediction_with_anchors
+        self.url_prediction
             .replace("{user_input}", user_input)
-            .replace("{current_url}", current_url)
             .replace("{anchor_urls}", &anchor_urls_formatted)
     }
 
@@ -75,11 +61,9 @@ impl PromptTemplates {
             "No anchor links available on the current page.".to_string()
         } else {
             let mut formatted = String::new();
-            formatted.push_str("```\n");
-            for (index, url) in anchor_urls.iter().enumerate() {
-                formatted.push_str(&format!("{{ index: {}, url: \"{}\" }},\n", index + 1, url));
+            for url in anchor_urls.iter() {
+                formatted.push_str(&format!("- {}\n", url));
             }
-            formatted.push_str("```");
             formatted
         }
     }
@@ -530,7 +514,7 @@ impl OllamaWorker {
             .prompts
             .as_ref()
             .unwrap()
-            .format_url_prediction_with_anchors(&input, &current_url, &anchor_urls);
+            .format_url_prediction(&input, &anchor_urls);
         let user_message = Message::user(prompt);
         let model_name = self
             .models
@@ -562,11 +546,13 @@ impl OllamaWorker {
     /// Run a quick general URL prediction using only the user input and the generic prompt
     /// This is called immediately on UrlInput so the UI can show instant suggestions.
     fn run_general_url_prediction(&mut self, webview_id: WebViewId, input: String) {
+        // For general prediction, use empty anchor URLs
+        let anchor_urls = Vec::new();
         let prompt = self
             .prompts
             .as_ref()
             .unwrap()
-            .format_url_prediction_general(&input);
+            .format_url_prediction(&input, &anchor_urls);
         let user_message = Message::user(prompt);
         let model_name = self
             .models
