@@ -8,6 +8,8 @@ Besides your general knowledge of websites, use this list of urls, potentially e
 
 {anchor_urls}
 
+In all cases, do not predict the current url, which is: {current_url}
+
 #### How to perform the prediction
 
 You should assume the user does not type a url, but rather the name of a site. The user could also be typing some general concept, in which case you should attempt to match it with a site. In all cases, do not over-think this: use quick and dirty heuristics and respond quickly.

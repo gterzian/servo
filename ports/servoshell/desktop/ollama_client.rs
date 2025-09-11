@@ -49,10 +49,16 @@ impl PromptTemplates {
         self.browser_action.replace("{user_input}", user_input)
     }
 
-    fn format_url_prediction(&self, user_input: &str, anchor_urls: &[ServoUrl]) -> String {
+    fn format_url_prediction(
+        &self,
+        user_input: &str,
+        current_url: &str,
+        anchor_urls: &[ServoUrl],
+    ) -> String {
         let anchor_urls_formatted = Self::format_anchor_urls(anchor_urls);
         self.url_prediction
             .replace("{user_input}", user_input)
+            .replace("{current_url}", current_url)
             .replace("{anchor_urls}", &anchor_urls_formatted)
     }
 
@@ -331,7 +337,11 @@ impl OllamaWorker {
                 if now.duration_since(pending.timestamp) >= URL_INPUT_DEBOUNCE_TIMEOUT {
                     // Take the pending input and process it
                     let pending = self.pending_url_input.take().unwrap();
-                    self.run_general_url_prediction(pending.webview_id, pending.input.clone());
+                    self.run_general_url_prediction(
+                        pending.webview_id,
+                        pending.input.clone(),
+                        pending.current_url.clone(),
+                    );
 
                     // Continue to next loop iteration to recalc timeouts
                     continue;
@@ -509,11 +519,11 @@ impl OllamaWorker {
             _ => Vec::new(), // No anchors available yet, proceed with empty list
         };
 
-        let prompt = self
-            .prompts
-            .as_ref()
-            .unwrap()
-            .format_url_prediction(&input, &anchor_urls);
+        let prompt = self.prompts.as_ref().unwrap().format_url_prediction(
+            &input,
+            &current_url,
+            &anchor_urls,
+        );
         let user_message = Message::user(prompt);
         let model_name = self
             .models
@@ -544,14 +554,19 @@ impl OllamaWorker {
 
     /// Run a quick general URL prediction using only the user input and the generic prompt
     /// This is called immediately on UrlInput so the UI can show instant suggestions.
-    fn run_general_url_prediction(&mut self, webview_id: WebViewId, input: String) {
+    fn run_general_url_prediction(
+        &mut self,
+        webview_id: WebViewId,
+        input: String,
+        current_url: String,
+    ) {
         // For general prediction, use empty anchor URLs
         let anchor_urls = Vec::new();
-        let prompt = self
-            .prompts
-            .as_ref()
-            .unwrap()
-            .format_url_prediction(&input, &anchor_urls);
+        let prompt = self.prompts.as_ref().unwrap().format_url_prediction(
+            &input,
+            &current_url,
+            &anchor_urls,
+        );
         let user_message = Message::user(prompt);
         let model_name = self
             .models
