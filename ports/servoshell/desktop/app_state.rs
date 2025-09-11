@@ -748,19 +748,6 @@ impl RunningAppState {
     /// Handle browser action from ollama client
     fn handle_browser_action(&self, action: BrowserAction) {
         match action {
-            BrowserAction::Navigate(urls) => {
-                for url_str in urls {
-                    let res = url::Url::parse(&url_str);
-                    match res {
-                        Ok(url) => {
-                            self.create_and_focus_new_webview_for_browser_action(url);
-                        },
-                        Err(_e) => {
-                            // Failed to parse URL, ignore
-                        },
-                    }
-                }
-            },
             BrowserAction::Close => {
                 let webview_ids: Vec<_> = self.inner().webviews.keys().copied().collect();
                 for webview_id in webview_ids {

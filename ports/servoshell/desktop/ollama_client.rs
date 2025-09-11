@@ -182,7 +182,6 @@ pub enum OllamaResponse {
 
 #[derive(Debug, Clone)]
 pub enum BrowserAction {
-    Navigate(Vec<String>),
     Close,
     Nothing,
 }
@@ -594,18 +593,6 @@ impl OllamaWorker {
             Ok(json) => {
                 if let Some(action) = json.get("action").and_then(|a| a.as_str()) {
                     match action {
-                        "NAVIGATE" => {
-                            if let Some(value) = json.get("value").and_then(|v| v.as_array()) {
-                                let urls: Vec<String> = value
-                                    .iter()
-                                    .filter_map(|url| url.as_str())
-                                    .map(|s| s.to_string())
-                                    .collect();
-                                BrowserAction::Navigate(urls)
-                            } else {
-                                BrowserAction::Nothing
-                            }
-                        },
                         "CLOSE" => BrowserAction::Close,
                         "NOTHING" => BrowserAction::Nothing,
                         _ => BrowserAction::Nothing,
