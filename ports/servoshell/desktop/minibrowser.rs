@@ -210,6 +210,13 @@ impl Minibrowser {
 
         let inactive_bg_color = ui.visuals().window_fill;
         let active_bg_color = ui.visuals().widgets.active.weak_bg_fill;
+        // Create a lighter shade for hover state - blend active color with inactive for lighter appearance
+        let hover_bg_color = Color32::from_rgba_unmultiplied(
+            ((active_bg_color.r() as u16 + inactive_bg_color.r() as u16 * 2) / 3) as u8,
+            ((active_bg_color.g() as u16 + inactive_bg_color.g() as u16 * 2) / 3) as u8,
+            ((active_bg_color.b() as u16 + inactive_bg_color.b() as u16 * 2) / 3) as u8,
+            active_bg_color.a(),
+        );
         let selected = webview.focused();
 
         // Setup a tab frame that will contain the favicon, title and close button
@@ -227,7 +234,11 @@ impl Minibrowser {
                 // we can make sure that both the label and close button have the same background color
                 visuals.widgets.noninteractive.weak_bg_fill = inactive_bg_color;
                 visuals.widgets.inactive.weak_bg_fill = inactive_bg_color;
-                visuals.widgets.hovered.weak_bg_fill = active_bg_color;
+                visuals.widgets.hovered.weak_bg_fill = if selected {
+                    active_bg_color
+                } else {
+                    hover_bg_color
+                };
                 visuals.widgets.active.weak_bg_fill = active_bg_color;
                 visuals.selection.bg_fill = active_bg_color;
                 visuals.selection.stroke.color = visuals.widgets.active.fg_stroke.color;
@@ -272,8 +283,10 @@ impl Minibrowser {
         }
 
         let response = tab_frame.allocate_space(ui);
-        let fill_color = if selected || response.hovered() {
+        let fill_color = if selected {
             active_bg_color
+        } else if response.hovered() {
+            hover_bg_color
         } else {
             inactive_bg_color
         };
