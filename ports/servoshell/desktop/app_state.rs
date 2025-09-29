@@ -93,6 +93,15 @@ pub struct RunningAppStateInner {
     /// Ollama client support, which may be `None` if not on macOS or if it failed to initialize.
     ollama_client: Option<OllamaHandle>,
 
+    /// History of terminal commands shown in the minibrowser UI.
+    llm_terminal_history: Vec<String>,
+
+    /// Whether the minibrowser terminal is currently visible.
+    llm_terminal_visible: bool,
+
+    /// Tracks if the terminal UI needs a redraw to reflect new state.
+    llm_terminal_dirty: bool,
+
     /// Whether or not the application interface needs to be updated.
     need_update: bool,
 
@@ -142,6 +151,9 @@ impl RunningAppState {
                 window,
                 gamepad_support: GamepadSupport::maybe_new(),
                 ollama_client: ollama_client::start_ollama_client(event_loop_waker),
+                llm_terminal_history: Vec::new(),
+                llm_terminal_visible: true,
+                llm_terminal_dirty: false,
                 need_update: false,
                 need_repaint: false,
                 url_prediction_general: None,
@@ -269,10 +281,16 @@ impl RunningAppState {
 
         // Delegate handlers may have asked us to present or update compositor contents.
         // Currently, egui-file-dialog dialogs need to be constantly redrawn or animations aren't fluid.
-        let need_window_redraw = self.inner().need_repaint ||
-            self.has_active_dialog() ||
-            self.has_pending_url_predictions();
-        let need_update = std::mem::replace(&mut self.inner_mut().need_update, false);
+        let has_active_dialog = self.has_active_dialog();
+        let has_pending_predictions = self.has_pending_url_predictions();
+
+        let mut inner = self.inner_mut();
+        let need_repaint = inner.need_repaint;
+        let llm_terminal_dirty = std::mem::take(&mut inner.llm_terminal_dirty);
+        let need_update = std::mem::replace(&mut inner.need_update, false);
+        let need_window_redraw =
+            need_repaint || has_active_dialog || has_pending_predictions || llm_terminal_dirty;
+        drop(inner);
 
         PumpResult::Continue {
             need_update,
@@ -418,6 +436,28 @@ impl RunningAppState {
         if let Some((_, webview)) = self.webviews().get(index) {
             webview.focus();
         }
+    }
+
+    pub(crate) fn llm_terminal_visible(&self) -> bool {
+        self.inner().llm_terminal_visible
+    }
+
+    pub(crate) fn set_llm_terminal_visible(&self, visible: bool) {
+        let mut inner = self.inner_mut();
+        if inner.llm_terminal_visible != visible {
+            inner.llm_terminal_visible = visible;
+            inner.llm_terminal_dirty = true;
+        }
+    }
+
+    pub(crate) fn llm_terminal_history(&self) -> Vec<String> {
+        self.inner().llm_terminal_history.clone()
+    }
+
+    pub(crate) fn append_llm_terminal_entry(&self, entry: String) {
+        let mut inner = self.inner_mut();
+        inner.llm_terminal_history.push(entry);
+        inner.llm_terminal_dirty = true;
     }
 
     fn add_dialog(&self, webview: servo::WebView, dialog: Dialog) {

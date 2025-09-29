@@ -11,7 +11,8 @@ use dpi::PhysicalSize;
 use egui::text::{CCursor, CCursorRange};
 use egui::text_edit::TextEditState;
 use egui::{
-    Button, CentralPanel, Frame, Key, Label, Modifiers, PaintCallback, TopBottomPanel, Vec2, pos2,
+    Button, CentralPanel, Frame, Key, Label, Modifiers, PaintCallback, ScrollArea, TopBottomPanel,
+    Vec2, pos2,
 };
 use egui_glow::CallbackFn;
 use egui_winit::EventResponse;
@@ -75,6 +76,8 @@ pub enum MinibrowserEvent {
     CloseWebView(WebViewId),
     /// LLM input submitted.
     LLMInput(String),
+    /// Toggle terminal visibility.
+    SetLLMTerminalVisibility(bool),
     /// Address bar text changed.
     AddressBarInput(String),
     /// Request a prediction that uses the current page anchors (user clicked the bottom item)
@@ -594,35 +597,71 @@ impl Minibrowser {
                     .push(MinibrowserEvent::Go(predicted_url.clone()));
             }
 
-            // Add the new bottom panel with simple text input
+            // Add the LLM terminal panel with history and toggle
             TopBottomPanel::bottom("llm_input").show(ctx, |ui| {
-                ui.allocate_ui_with_layout(
-                    ui.available_size(),
-                    egui::Layout::top_down(egui::Align::LEFT),
-                    |ui| {
-                        // Text input area
-                        ui.label("Ask the LLM:");
-                        let text_edit = ui.add_sized(
-                            [ui.available_width(), 60.0], // Make it 60 pixels tall
-                            egui::TextEdit::multiline(&mut *bottom_text_input.borrow_mut())
-                                .hint_text("Type your question and press Enter..."),
-                        );
+                let mut is_visible = state.llm_terminal_visible();
+                ui.horizontal(|ui| {
+                    let button_text = if is_visible {
+                        "Hide Terminal"
+                    } else {
+                        "Show Terminal"
+                    };
+                    if ui.button(button_text).clicked() {
+                        let new_visibility = !is_visible;
+                        is_visible = new_visibility;
+                        event_queue
+                            .borrow_mut()
+                            .push(MinibrowserEvent::SetLLMTerminalVisibility(new_visibility));
+                    }
+                    ui.label("LLM Terminal");
+                });
 
-                        // Handle Enter key press
-                        if text_edit.has_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-                            let text = bottom_text_input.borrow().clone();
-                            if !text.trim().is_empty() {
-                                // Send LLMInput event instead of calling ollama directly
-                                event_queue
-                                    .borrow_mut()
-                                    .push(MinibrowserEvent::LLMInput(text));
+                if !is_visible {
+                    return;
+                }
 
-                                // Clear the input after sending
-                                bottom_text_input.replace(String::new());
+                ui.separator();
+
+                let history = state.llm_terminal_history();
+                ScrollArea::vertical()
+                    .auto_shrink([false; 2])
+                    .stick_to_bottom(true)
+                    .max_height(200.0)
+                    .show(ui, |ui| {
+                        if history.is_empty() {
+                            ui.monospace("No commands yet.");
+                        } else {
+                            for entry in history.iter() {
+                                ui.monospace(entry);
                             }
                         }
-                    },
+                    });
+
+                ui.separator();
+
+                let mut input_ref = bottom_text_input.borrow_mut();
+                let text_edit = ui.add_sized(
+                    [ui.available_width(), 28.0],
+                    egui::TextEdit::singleline(&mut *input_ref)
+                        .hint_text("Enter command and press Enter"),
                 );
+
+                if text_edit.changed() {
+                    // Keep caret visible by ensuring the input retains focus after edits
+                    text_edit.request_focus();
+                }
+
+                if text_edit.has_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+                    let trimmed = input_ref.trim();
+                    if !trimmed.is_empty() {
+                        let command = trimmed.to_string();
+                        event_queue
+                            .borrow_mut()
+                            .push(MinibrowserEvent::LLMInput(command));
+                        input_ref.clear();
+                        text_edit.request_focus();
+                    }
+                }
             }); // The toolbar height is where the Context’s available rect starts.
             // For reasons that are unclear, the TopBottomPanel’s ui cursor exceeds this by one egui
             // point, but the Context is correct and the TopBottomPanel is wrong.
