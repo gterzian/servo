@@ -3,12 +3,12 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 use std::collections::HashMap;
-use std::fs;
 use std::path::Path;
 use std::result::Result as StdResult;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
+use std::{fmt, fs};
 
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
@@ -190,6 +190,15 @@ pub enum OllamaResponse {
 pub enum BrowserAction {
     Close,
     Nothing,
+}
+
+impl fmt::Display for BrowserAction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BrowserAction::Close => write!(f, "Close all tabs"),
+            BrowserAction::Nothing => write!(f, "No action"),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

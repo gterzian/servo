@@ -339,7 +339,6 @@ impl App {
                     state.close_webview(id);
                 },
                 MinibrowserEvent::LLMInput(text) => {
-                    state.append_llm_terminal_entry(format!("> {}", text));
                     // Send input to the LLM.
                     state.send_llm_message(text);
                 },

@@ -37,6 +37,19 @@ use super::window_trait::{LINE_HEIGHT, LINE_WIDTH, WindowPortsMethods};
 use crate::output_image::save_output_image_if_necessary;
 use crate::prefs::ServoShellPreferences;
 
+#[derive(Clone)]
+pub struct LLMTerminalEntry {
+    pub user_input: String,
+    pub response: LLMResponse,
+}
+
+#[derive(Clone)]
+pub enum LLMResponse {
+    Pending,
+    Ready(BrowserAction),
+    Error(String),
+}
+
 pub(crate) enum AppState {
     Initializing,
     Running(Rc<RunningAppState>),
@@ -93,8 +106,8 @@ pub struct RunningAppStateInner {
     /// Ollama client support, which may be `None` if not on macOS or if it failed to initialize.
     ollama_client: Option<OllamaHandle>,
 
-    /// History of terminal commands shown in the minibrowser UI.
-    llm_terminal_history: Vec<String>,
+    /// History of terminal commands and responses.
+    llm_terminal_history: Vec<LLMTerminalEntry>,
 
     /// Whether the minibrowser terminal is currently visible.
     llm_terminal_visible: bool,
@@ -283,13 +296,18 @@ impl RunningAppState {
         // Currently, egui-file-dialog dialogs need to be constantly redrawn or animations aren't fluid.
         let has_active_dialog = self.has_active_dialog();
         let has_pending_predictions = self.has_pending_url_predictions();
+        let has_pending_llm_response = self.has_pending_llm_response();
 
         let mut inner = self.inner_mut();
         let need_repaint = inner.need_repaint;
         let llm_terminal_dirty = std::mem::take(&mut inner.llm_terminal_dirty);
-        let need_update = std::mem::replace(&mut inner.need_update, false);
-        let need_window_redraw =
-            need_repaint || has_active_dialog || has_pending_predictions || llm_terminal_dirty;
+        let need_update =
+            std::mem::replace(&mut inner.need_update, false) || has_pending_llm_response;
+        let need_window_redraw = need_repaint ||
+            has_active_dialog ||
+            has_pending_predictions ||
+            has_pending_llm_response ||
+            llm_terminal_dirty;
         drop(inner);
 
         PumpResult::Continue {
@@ -421,6 +439,7 @@ impl RunningAppState {
                     },
                     OllamaResponse::Error(error) => {
                         eprintln!("Ollama client error: {}", error);
+                        self.record_llm_error(format!("Error: {}", error));
                     },
                 },
                 Err(TryRecvError::Empty) => break,
@@ -450,14 +469,16 @@ impl RunningAppState {
         }
     }
 
-    pub(crate) fn llm_terminal_history(&self) -> Vec<String> {
+    pub(crate) fn llm_terminal_history(&self) -> Vec<LLMTerminalEntry> {
         self.inner().llm_terminal_history.clone()
     }
 
-    pub(crate) fn append_llm_terminal_entry(&self, entry: String) {
-        let mut inner = self.inner_mut();
-        inner.llm_terminal_history.push(entry);
-        inner.llm_terminal_dirty = true;
+    pub(crate) fn has_pending_llm_response(&self) -> bool {
+        let inner = self.inner();
+        inner
+            .llm_terminal_history
+            .iter()
+            .any(|entry| matches!(entry.response, LLMResponse::Pending))
     }
 
     fn add_dialog(&self, webview: servo::WebView, dialog: Dialog) {
@@ -667,9 +688,40 @@ impl RunningAppState {
 
     /// Send a message to the LLM via ollama client
     pub(crate) fn send_llm_message(&self, message: String) {
+        {
+            let mut inner = self.inner_mut();
+            inner.llm_terminal_history.push(LLMTerminalEntry {
+                user_input: format!("> {}", &message),
+                response: LLMResponse::Pending,
+            });
+            inner.llm_terminal_dirty = true;
+        }
+
         if let Some(ollama_client) = &self.inner().ollama_client {
             ollama_client.send_user_message(message);
         }
+    }
+
+    pub(crate) fn resolve_llm_action(&self, action: BrowserAction) {
+        let mut inner = self.inner_mut();
+        let entry = inner
+            .llm_terminal_history
+            .iter_mut()
+            .find(|entry| matches!(entry.response, LLMResponse::Pending))
+            .expect("expected pending LLM response entry");
+        entry.response = LLMResponse::Ready(action);
+        inner.llm_terminal_dirty = true;
+    }
+
+    pub(crate) fn record_llm_error(&self, message: String) {
+        let mut inner = self.inner_mut();
+        let entry = inner
+            .llm_terminal_history
+            .iter_mut()
+            .find(|entry| matches!(entry.response, LLMResponse::Pending))
+            .expect("expected pending LLM response entry");
+        entry.response = LLMResponse::Error(message);
+        inner.llm_terminal_dirty = true;
     }
 
     /// Send URL input to the LLM via ollama client
@@ -787,6 +839,8 @@ impl RunningAppState {
 
     /// Handle browser action from ollama client
     fn handle_browser_action(&self, action: BrowserAction) {
+        self.resolve_llm_action(action.clone());
+
         match action {
             BrowserAction::Close => {
                 let webview_ids: Vec<_> = self.inner().webviews.keys().copied().collect();

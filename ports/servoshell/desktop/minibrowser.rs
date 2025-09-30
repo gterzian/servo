@@ -27,7 +27,7 @@ use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::window::Window;
 
-use super::app_state::RunningAppState;
+use super::app_state::{LLMResponse, RunningAppState};
 use super::egui_glue::EguiGlow;
 use super::events_loop::EventLoopProxy;
 use super::geometry::winit_position_to_euclid_point;
@@ -632,7 +632,25 @@ impl Minibrowser {
                             ui.monospace("No commands yet.");
                         } else {
                             for entry in history.iter() {
-                                ui.monospace(entry);
+                                if !entry.user_input.is_empty() {
+                                    ui.monospace(&entry.user_input);
+                                }
+
+                                match &entry.response {
+                                    LLMResponse::Pending => {
+                                        ui.horizontal(|ui| {
+                                            ui.spinner();
+                                            ui.monospace("Waiting for LLM response…");
+                                        });
+                                    },
+                                    LLMResponse::Ready(action) => {
+                                        ui.monospace(format!("LLM action: {}", action));
+                                    },
+                                    LLMResponse::Error(message) => {
+                                        let color = ui.visuals().error_fg_color;
+                                        ui.colored_label(color, message);
+                                    },
+                                }
                             }
                         }
                     });
