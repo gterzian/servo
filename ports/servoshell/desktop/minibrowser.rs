@@ -651,7 +651,9 @@ impl Minibrowser {
                     text_edit.request_focus();
                 }
 
-                if text_edit.has_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+                let enter_pressed = ui.input(|i| i.key_pressed(Key::Enter));
+
+                if enter_pressed && (text_edit.has_focus() || text_edit.lost_focus()) {
                     let trimmed = input_ref.trim();
                     if !trimmed.is_empty() {
                         let command = trimmed.to_string();
