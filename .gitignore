@@ -29,6 +29,7 @@ servo.pftrace
 /glfw
 webrender-captures/
 /screenshots
+specs/
 
 # Allow CSV files to be used as resources in tests
 !/tests/**/*.csv
