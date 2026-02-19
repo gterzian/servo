@@ -10715,7 +10715,9 @@ dependencies = [
 name = "webnn_traits"
 version = "0.0.1"
 dependencies = [
+ "base",
  "serde",
+ "servo_malloc_size_of",
 ]
 
 [[package]]
