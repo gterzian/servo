@@ -435,6 +435,7 @@ impl DedicatedWorkerGlobalScope {
                     init.script_to_embedder_chan.clone(),
                     init.resource_threads.clone(),
                     init.storage_threads.clone(),
+                    init.webnn_sender.clone(),
                     #[cfg(feature = "webgpu")]
                     gpu_id_hub.clone(),
                     cx,

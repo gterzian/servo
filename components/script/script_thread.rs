@@ -101,6 +101,7 @@ use timers::{TimerEventRequest, TimerId, TimerScheduler};
 use url::Position;
 #[cfg(feature = "webgpu")]
 use webgpu_traits::{WebGPUDevice, WebGPUMsg};
+use webnn_traits::WebNNMsg;
 use webrender_api::ExternalScrollId;
 use webrender_api::units::LayoutVector2D;
 
@@ -263,6 +264,10 @@ pub struct ScriptThread {
 
     #[no_trace]
     storage_threads: StorageThreads,
+
+    /// Channel to a WebNN manager (stub).
+    #[no_trace]
+    webnn_sender: base::generic_channel::GenericSender<WebNNMsg>,
 
     /// A queue of tasks to be executed in this script-thread.
     task_queue: TaskQueue<MainThreadScriptMsg>,
@@ -750,6 +755,7 @@ impl ScriptThread {
                         to_script_thread_sender: script_thread.senders.self_sender.clone(),
                         resource_threads: script_thread.resource_threads.clone(),
                         storage_threads: script_thread.storage_threads.clone(),
+                        webnn_sender: script_thread.webnn_sender.clone(),
                         mem_profiler_chan: script_thread.senders.memory_profiler_sender.clone(),
                         time_profiler_chan: script_thread.senders.time_profiler_sender.clone(),
                         devtools_chan: script_thread.senders.devtools_server_sender.clone(),
@@ -945,6 +951,7 @@ impl ScriptThread {
             senders.pipeline_to_embedder_sender.clone(),
             state.resource_threads.clone(),
             state.storage_threads.clone(),
+            state.webnn_sender.clone(),
             #[cfg(feature = "webgpu")]
             gpu_id_hub.clone(),
             &mut cx,
@@ -971,6 +978,7 @@ impl ScriptThread {
                 image_cache_factory,
                 resource_threads: state.resource_threads,
                 storage_threads: state.storage_threads,
+                webnn_sender: state.webnn_sender.clone(),
                 task_queue,
                 background_hang_monitor,
                 closing,
@@ -3266,6 +3274,7 @@ impl ScriptThread {
             image_cache.clone(),
             self.resource_threads.clone(),
             self.storage_threads.clone(),
+            self.webnn_sender.clone(),
             #[cfg(feature = "bluetooth")]
             self.senders.bluetooth_sender.clone(),
             self.senders.memory_profiler_sender.clone(),

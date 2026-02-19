@@ -53,6 +53,7 @@ use style_traits::{CSSPixel, SpeculativePainter};
 use stylo_atoms::Atom;
 #[cfg(feature = "webgpu")]
 use webgpu_traits::WebGPUMsg;
+use webnn_traits::WebNNMsg;
 use webrender_api::units::{DevicePixel, LayoutVector2D};
 use webrender_api::{ExternalScrollId, ImageKey};
 
@@ -364,6 +365,8 @@ pub struct InitialScriptState {
     pub resource_threads: ResourceThreads,
     /// A channel to the storage manager thread.
     pub storage_threads: StorageThreads,
+    /// A channel to the WebNN manager (stub).
+    pub webnn_sender: base::generic_channel::GenericSender<WebNNMsg>,
     /// A channel to the bluetooth thread.
     #[cfg(feature = "bluetooth")]
     pub bluetooth_sender: GenericSender<BluetoothRequest>,

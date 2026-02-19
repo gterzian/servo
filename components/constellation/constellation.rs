@@ -173,6 +173,7 @@ use style::global_style_data::StyleThreadPool;
 use webgpu::canvas_context::WebGpuExternalImageMap;
 #[cfg(feature = "webgpu")]
 use webgpu_traits::{WebGPU, WebGPURequest};
+use webnn_traits::WebNNMsg;
 use webrender_api::ExternalScrollId;
 use webrender_api::units::LayoutVector2D;
 
@@ -349,6 +350,12 @@ pub struct Constellation<STF, SWF> {
     /// threads: one for public browsing, and one for private
     /// browsing.
     pub(crate) private_storage_threads: StorageThreads,
+
+    /// A channel for the constellation to send messages to the WebNN manager.
+    pub(crate) webnn_sender: base::generic_channel::GenericSender<WebNNMsg>,
+
+    /// The JoinHandle for the WebNN manager thread (if any).
+    pub(crate) webnn_join_handle: Option<JoinHandle<()>>,
 
     /// A channel for the constellation to send messages to the font
     /// cache thread.
@@ -541,6 +548,12 @@ pub struct InitialConstellationState {
     /// A channel to the storage thread.
     pub private_storage_threads: StorageThreads,
 
+    /// A channel to the WebNN manager (stub).
+    pub webnn_sender: base::generic_channel::GenericSender<WebNNMsg>,
+
+    /// Join handle for the WebNN manager thread (if available).
+    pub webnn_join_handle: Option<JoinHandle<()>>,
+
     /// A channel to the time profiler thread.
     pub time_profiler_chan: time::ProfilerChan,
 
@@ -677,6 +690,8 @@ where
                     private_resource_threads: state.private_resource_threads,
                     public_storage_threads: state.public_storage_threads,
                     private_storage_threads: state.private_storage_threads,
+                    webnn_sender: state.webnn_sender,
+                    webnn_join_handle: state.webnn_join_handle,
                     system_font_service: state.system_font_service,
                     sw_managers: Default::default(),
                     swmanager_receiver,
@@ -2613,6 +2628,17 @@ where
         if let Some(join_handle) = self.background_monitor_register_join_handle.take() {
             if join_handle.join().is_err() {
                 error!("Failed to join on the bhm background thread.");
+            }
+        }
+
+        // Ask the WebNN manager to exit and join its thread if we own a handle.
+        debug!("Exiting WebNN manager.");
+        if let Err(e) = self.webnn_sender.send(WebNNMsg::Exit) {
+            warn!("Exit WebNN manager failed ({:?})", e);
+        }
+        if let Some(join_handle) = self.webnn_join_handle.take() {
+            if join_handle.join().is_err() {
+                error!("Failed to join on the WebNN manager thread.");
             }
         }
 

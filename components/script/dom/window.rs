@@ -96,6 +96,7 @@ use style::stylesheets::UrlExtraData;
 use style_traits::CSSPixel;
 use stylo_atoms::Atom;
 use url::Position;
+use webnn_traits::WebNNMsg;
 use webrender_api::ExternalScrollId;
 use webrender_api::units::{DeviceIntSize, DevicePixel, LayoutPixel, LayoutPoint};
 
@@ -3596,6 +3597,7 @@ impl Window {
         image_cache: Arc<dyn ImageCache>,
         resource_threads: ResourceThreads,
         storage_threads: StorageThreads,
+        webnn_sender: base::generic_channel::GenericSender<WebNNMsg>,
         #[cfg(feature = "bluetooth")] bluetooth_thread: GenericSender<BluetoothRequest>,
         mem_profiler_chan: MemProfilerChan,
         time_profiler_chan: TimeProfilerChan,
@@ -3639,6 +3641,7 @@ impl Window {
                 embedder_chan,
                 resource_threads,
                 storage_threads,
+                webnn_sender,
                 origin,
                 creation_url,
                 Some(top_level_creation_url),

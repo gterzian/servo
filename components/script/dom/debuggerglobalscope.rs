@@ -24,6 +24,7 @@ use script_bindings::realms::InRealm;
 use script_bindings::reflector::DomObject;
 use servo_url::{ImmutableOrigin, MutableOrigin, ServoUrl};
 use storage_traits::StorageThreads;
+use webnn_traits::WebNNMsg;
 
 use crate::dom::bindings::codegen::Bindings::DebuggerGlobalScopeBinding;
 use crate::dom::bindings::codegen::Bindings::DebuggerPauseEventBinding::PauseFrameResult;
@@ -74,6 +75,7 @@ impl DebuggerGlobalScope {
         script_to_embedder_chan: ScriptToEmbedderChan,
         resource_threads: ResourceThreads,
         storage_threads: StorageThreads,
+        webnn_sender: base::generic_channel::GenericSender<WebNNMsg>,
         #[cfg(feature = "webgpu")] gpu_id_hub: std::sync::Arc<IdentityHub>,
         cx: &mut js::context::JSContext,
     ) -> DomRoot<Self> {
@@ -87,6 +89,7 @@ impl DebuggerGlobalScope {
                 script_to_embedder_chan,
                 resource_threads,
                 storage_threads,
+                webnn_sender,
                 MutableOrigin::new(ImmutableOrigin::new_opaque()),
                 ServoUrl::parse_with_base(None, "about:internal/debugger")
                     .expect("Guaranteed by argument"),

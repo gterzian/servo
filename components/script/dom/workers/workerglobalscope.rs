@@ -94,6 +94,7 @@ pub(crate) fn prepare_workerscope_init(
     WorkerGlobalScopeInit {
         resource_threads: global.resource_threads().clone(),
         storage_threads: global.storage_threads().clone(),
+        webnn_sender: global.webnn_sender().clone(),
         mem_profiler_chan: global.mem_profiler_chan().clone(),
         to_devtools_sender: global.devtools_chan().cloned(),
         time_profiler_chan: global.time_profiler_chan().clone(),
@@ -363,6 +364,7 @@ impl WorkerGlobalScope {
                 init.script_to_embedder_chan,
                 init.resource_threads,
                 init.storage_threads,
+                init.webnn_sender.clone(),
                 MutableOrigin::new(init.origin),
                 worker_url.clone(),
                 None,

@@ -20,6 +20,7 @@ use script_traits::Painter;
 use servo_url::{ImmutableOrigin, MutableOrigin, ServoUrl};
 use storage_traits::StorageThreads;
 use stylo_atoms::Atom;
+use webnn_traits::WebNNMsg;
 
 use crate::dom::bindings::inheritance::Castable;
 use crate::dom::bindings::root::DomRoot;
@@ -114,6 +115,7 @@ impl WorkletGlobalScope {
                 init.to_embedder_sender.clone(),
                 init.resource_threads.clone(),
                 init.storage_threads.clone(),
+                init.webnn_sender.clone(),
                 MutableOrigin::new(ImmutableOrigin::new_opaque()),
                 base_url.clone(),
                 None,
@@ -203,6 +205,8 @@ pub(crate) struct WorkletGlobalScopeInit {
     pub(crate) resource_threads: ResourceThreads,
     /// Channels to the [`StorageThreads`].
     pub(crate) storage_threads: StorageThreads,
+    /// Channel to the WebNN manager (stub)
+    pub(crate) webnn_sender: GenericSender<WebNNMsg>,
     /// Channel to the memory profiler
     pub(crate) mem_profiler_chan: mem::ProfilerChan,
     /// Channel to the time profiler

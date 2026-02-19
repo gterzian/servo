@@ -1552,6 +1552,7 @@ dependencies = [
  "tracing",
  "webgpu",
  "webgpu_traits",
+ "webnn_traits",
  "webrender",
  "webrender_api",
  "webxr-api",
@@ -1588,6 +1589,7 @@ dependencies = [
  "stylo_traits",
  "uuid",
  "webgpu_traits",
+ "webnn_traits",
  "webrender_api",
  "wgpu-core",
 ]
@@ -5210,6 +5212,8 @@ dependencies = [
  "url",
  "webgl",
  "webgpu",
+ "webnn",
+ "webnn_traits",
  "webrender",
  "webrender_api",
  "webxr",
@@ -8036,6 +8040,8 @@ dependencies = [
  "uuid",
  "webdriver",
  "webgpu_traits",
+ "webnn",
+ "webnn_traits",
  "webrender_api",
  "webxr-api",
  "wgpu-core",
@@ -8130,6 +8136,7 @@ dependencies = [
  "stylo_atoms",
  "stylo_traits",
  "webgpu_traits",
+ "webnn_traits",
  "webrender_api",
  "webxr-api",
 ]
@@ -10664,6 +10671,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "webnn"
+version = "0.0.1"
+dependencies = [
+ "base",
+ "log",
+ "webnn_traits",
+]
+
+[[package]]
 name = "webnn-graph"
 version = "0.2.1"
 source = "git+https://github.com/rustnn/webnn-graph?branch=main#eba3691f16f1ba25a127e82fc55a3f8abf1e269b"
@@ -10693,6 +10709,13 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "webnn_traits"
+version = "0.0.1"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
