@@ -1403,6 +1403,94 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
 
 [[package]]
+<<<<<<< HEAD
+=======
+name = "constellation"
+version = "0.0.1"
+dependencies = [
+ "background_hang_monitor",
+ "background_hang_monitor_api",
+ "backtrace",
+ "base",
+ "bluetooth_traits",
+ "canvas",
+ "canvas_traits",
+ "constellation_traits",
+ "content-security-policy",
+ "crossbeam-channel",
+ "devtools_traits",
+ "embedder_traits",
+ "euclid",
+ "fonts",
+ "gaol",
+ "ipc-channel",
+ "keyboard-types",
+ "layout_api",
+ "log",
+ "media",
+ "net",
+ "net_traits",
+ "paint_api",
+ "parking_lot",
+ "profile",
+ "profile_traits",
+ "rand 0.9.2",
+ "rustc-hash 2.1.1",
+ "script_traits",
+ "serde",
+ "servo-tracing",
+ "servo_config",
+ "servo_url",
+ "storage_traits",
+ "stylo",
+ "stylo_traits",
+ "tracing",
+ "webgpu",
+ "webgpu_traits",
+ "webnn_traits",
+ "webrender",
+ "webrender_api",
+ "webxr-api",
+]
+
+[[package]]
+name = "constellation_traits"
+version = "0.0.1"
+dependencies = [
+ "base",
+ "canvas_traits",
+ "content-security-policy",
+ "devtools_traits",
+ "embedder_traits",
+ "encoding_rs",
+ "euclid",
+ "fonts_traits",
+ "http 1.4.0",
+ "hyper_serde",
+ "ipc-channel",
+ "log",
+ "malloc_size_of_derive",
+ "net_traits",
+ "paint_api",
+ "pixels",
+ "profile_traits",
+ "rustc-hash 2.1.1",
+ "serde",
+ "servo_config",
+ "servo_malloc_size_of",
+ "servo_url",
+ "storage_traits",
+ "strum",
+ "stylo_traits",
+ "uuid",
+ "webgpu_traits",
+ "webnn_traits",
+ "webrender_api",
+ "wgpu-core",
+]
+
+[[package]]
+>>>>>>> 41d80fb9384 (add basic backend)
 name = "content-security-policy"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4823,6 +4911,13 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+<<<<<<< HEAD
+=======
+ "webgl",
+ "webgpu",
+ "webnn",
+ "webnn_traits",
+>>>>>>> 41d80fb9384 (add basic backend)
  "webrender",
  "webrender_api",
  "winit",
@@ -7502,6 +7597,8 @@ dependencies = [
  "uuid",
  "webdriver",
  "webgpu_traits",
+ "webnn",
+ "webnn_traits",
  "webrender_api",
  "webxr-api",
  "wgpu-core",
@@ -7558,9 +7655,53 @@ dependencies = [
  "encoding_rs",
  "euclid",
  "keyboard-types",
+<<<<<<< HEAD
  "servo-base",
  "servo-script",
  "servo-url",
+=======
+ "script",
+ "servo_url",
+]
+
+[[package]]
+name = "script_traits"
+version = "0.0.1"
+dependencies = [
+ "accesskit",
+ "background_hang_monitor_api",
+ "base",
+ "bluetooth_traits",
+ "canvas_traits",
+ "constellation_traits",
+ "content-security-policy",
+ "crossbeam-channel",
+ "devtools_traits",
+ "embedder_traits",
+ "euclid",
+ "fonts_traits",
+ "keyboard-types",
+ "log",
+ "malloc_size_of_derive",
+ "media",
+ "net_traits",
+ "paint_api",
+ "pixels",
+ "profile_traits",
+ "rustc-hash 2.1.1",
+ "serde",
+ "servo_config",
+ "servo_malloc_size_of",
+ "servo_url",
+ "storage_traits",
+ "strum",
+ "stylo_atoms",
+ "stylo_traits",
+ "webgpu_traits",
+ "webnn_traits",
+ "webrender_api",
+ "webxr-api",
+>>>>>>> 41d80fb9384 (add basic backend)
 ]
 
 [[package]]
@@ -11382,6 +11523,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "webnn"
+version = "0.0.1"
+dependencies = [
+ "base",
+ "log",
+ "webnn_traits",
+]
+
+[[package]]
 name = "webnn-graph"
 version = "0.2.1"
 source = "git+https://github.com/rustnn/webnn-graph?branch=main#eba3691f16f1ba25a127e82fc55a3f8abf1e269b"
@@ -11414,7 +11564,17 @@ dependencies = [
 ]
 
 [[package]]
+<<<<<<< HEAD
 >>>>>>> 24816e683dc (start using rustnn in basic dom algos)
+=======
+name = "webnn_traits"
+version = "0.0.1"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+>>>>>>> 41d80fb9384 (add basic backend)
 name = "webpki-root-certs"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
