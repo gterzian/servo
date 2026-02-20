@@ -10675,7 +10675,9 @@ name = "webnn"
 version = "0.0.1"
 dependencies = [
  "base",
+ "half",
  "log",
+ "rustnn",
  "webnn_traits",
 ]
 
@@ -10717,6 +10719,7 @@ version = "0.0.1"
 dependencies = [
  "base",
  "profile_traits",
+ "rustnn",
  "serde",
  "servo_malloc_size_of",
 ]
