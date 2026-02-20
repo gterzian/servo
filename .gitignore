@@ -31,6 +31,7 @@ servo.pftrace
 webrender-captures/
 /screenshots
 specs/
+scratchpad/
 
 # Allow CSV files to be used as resources in tests
 !/tests/**/*.csv
