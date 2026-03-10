@@ -11055,6 +11055,8 @@ dependencies = [
  "crossbeam",
  "half",
  "log",
+ "parking_lot",
+ "rayon",
  "rustnn",
  "servo-base",
  "servo-profile-traits",
